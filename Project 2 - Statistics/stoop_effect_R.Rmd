@@ -1,0 +1,135 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+congruent = c(12.079, 16.791, 9.564, 8.63, 14.669, 12.238, 14.692, 8.987, 9.401, 14.48, 22.328, 15.298, 15.073, 16.929, 18.2, 12.13, 18.495, 10.639, 11.344, 12.369, 12.944, 14.233, 19.71, 16.004)
+
+# Congruent Data summary
+cat("---------------------\n")
+cat("Congruent Details\n")
+cat("---------------------\n")
+
+c_mean = mean(congruent)
+c_median = median(congruent)
+c_IQR = IQR(congruent)
+c_SD = sd(congruent)
+
+cat("Mean -- ", c_mean)
+cat("\nMedian -- ", c_median)
+cat("\nIQR -- ", c_IQR)
+cat("\nSD -- ", c_SD)
+```
+
+```{r}
+boxplot(congruent)
+```
+
+```{r}
+plot(congruent)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+```{r}
+incongruent = c(19.278, 18.741, 21.214, 15.687, 22.803, 20.878, 24.572, 17.394, 20.762, 26.282, 24.524, 18.644, 17.51, 20.33, 35.255, 22.158, 25.139, 20.429, 17.425, 34.288, 23.894, 17.96, 22.058, 21.157
+)
+# Incongruent Data Summary
+cat("---------------------")
+cat("\nIncongruent Details\n")
+cat("---------------------\n")
+
+ic_mean = mean(incongruent)
+ic_median = median(incongruent)
+ic_IQR = IQR(incongruent)
+ic_SD = sd(incongruent)
+
+cat("Mean -- ", ic_mean)
+cat("\nMedian -- ", ic_median)
+cat("\nIQR -- ", ic_IQR)
+cat("\nSD -- ", ic_SD)
+```
+
+```{r}
+boxplot(incongruent)
+```
+
+```{r}
+plot(incongruent)
+```
+```{r}
+# Difference between congruent and incongruent
+difference = incongruent - congruent
+difference
+```
+
+```{r}
+# Difference Summary
+cat("---------------------")
+cat("\nDifference Details\n")
+cat("---------------------\n")
+
+d_mean = mean(difference)
+d_median = median(difference)
+d_IQR = IQR(difference)
+d_SD = sd(difference)
+
+cat("Mean -- ", d_mean)
+cat("\nMedian -- ", d_median)
+cat("\nIQR -- ", d_IQR)
+cat("\nSD -- ", d_SD)
+```
+
+```{r}
+plot(difference)
+```
+
+```{r}
+boxplot(difference)
+```
+
+```{r}
+# Standard Error
+SE = sqrt((c_SD **2 + ic_SD ** 2) / 24)
+SE
+```
+
+```{r}
+t_statistic = ic_mean - c_mean
+t_statistic
+(22.02 - 14.05)/1.22
+```
+
+```{r}
+# P-value = 0.05, 0.01, 0.005, 0.0001
+t_critical_95 = 1.687
+t_critical_99 = 2.410
+t_critical_995 = 2.687
+t_critical_999 = 4.042
+
+margin_of_error_95 = t_critical_95 * t_critical_95
+cat ("Margin of Error :: ", margin_of_error_95)
+CI_95 = c((ic_mean - c_mean) - margin_of_error_95, (ic_mean - c_mean) + margin_of_error_95 )
+cat ("\n95% confidence interval :: ", CI_95)
+```
+```{r}
+a = c(9, 10, 7, 5, 7, 5, 9, 6, 8, 7)
+b = c(7, 6, 5, 4, 4, 6, 7, 5, 5, 7)
+temp = c(2, 4, 2, 1, 3, -1, 2, 1, 3, 0)
+
+cat("Mean of Temp :: ", mean(b))
+cat("\nSD of Temp :: ", sd(b))
+```
+
+```{r}
+plot(b)
+```
+```{r}
+hist(b)
+```
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
