@@ -1,0 +1,1977 @@
+---
+title: "EDA with R -- 2016 Presidential Campaign Finance"
+author: "Sourabh Chakraborty"
+create date: "4/12/2017"
+last update date: "6/19/2017"
+output: html_document
+---
+# 2016 Presidential Campaign Finance for CA
+
+1. [Introduction](#introduction)
+2. [Data Preparation](#data_preparation)
+3. [Univariate Plots Section](#univariate_plots)
+4. [Univariate Analysis](#univariate_analysis)
+5. [Bivariate Plots Section](#bivariate_plots)
+6. [Bivariate Analysis](#bivariate_analysis)
+7. [Multivariate Plots Section](#multivariate_plots)
+8. [Multivariate Analysis](#multivariate_analysis)
+9. [Final Plots](#final_plots)
+10. [Reflection](#reflection)
+
+
+<div id="introduction">
+## 1. Introduction
+</div>
+
+This report will analyse *2016 Presidencial campaign* finance contributions for California. The dataset is available publically at [Federal Election Commission](http://classic.fec.gov/disclosurep/PDownload.do). The dataset for CA contains total of 1304347 contributions data records.
+
+The report contains a through analysis of the candidates & contributors and will try to understand what are factors influence people to make contribution towards particular candidates.
+
+```{r setup, include=FALSE}
+# Knit Global Options -- Code, messge & warnings, figure widths
+# code chunks will not be displayed in report
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, 
+                      warning = FALSE
+                    )
+```
+
+```{r import_libraries}
+#rm(list = ls())
+
+# For Data manipulations
+library(dplyr) 
+library(httr)
+library(data.table)
+library(DT)
+
+# For Gender prediction
+library(gender)
+
+# For String operations
+library(stringr)
+library(stringi)
+
+# For applying dictionary operations
+library(dict)
+
+# For applying various transformations
+library(scales)  
+
+# Zipcode of all us cities
+library(zipcode)
+
+# Misc package
+library(Hmisc)
+library(memisc)
+
+# Stats operations
+library(stats)
+library(randomForest)
+
+# For plotting
+library(ggplot2)
+library(gridExtra)
+library(plotrix)
+library(plotly)
+library(corrplot)
+library(GGally)
+library(RColorBrewer)
+library(ggmap)
+library(viridis)
+```
+
+<div id="data_preparation">
+## 2. Data Preparation
+</div>
+
+Load input file(part of main file) into R data frame. Added one comma at the end of the header as each line of data contains comma at the end and R is expecting one more column.
+
+```{r load_data}
+# Load the dataset
+df <- read.csv("files/P00000001-CA.csv", header = T, sep = ",", quote = "\"")
+df <- subset(df, select = -X)
+str(df)
+```
+
+### Data Overview - first 1000 records
+
+```{r data-overview}
+# HTML table to show data
+DT::datatable(df %>% head(1000))
+```
+
+<div id="data_prep">
+## 3. Data Preparation
+</div>
+In this section I will add new features or modify data definition so that it can enrich the overall analysis. Again I will categorize some features so that they can become more descriptive.
+
+### Add Party Name
+
+The below function will get the party name based on the candidates ID. Democrat candidates are identified by name and put into a list. I will focus only on democrats & republican.
+
+I will add a column to the data set to represent the party each member belongs to. Example, Trump is from Republican & Hillary is from Democrats.
+
+```{r add_party_name}
+# Add party name using the candidates' names
+## Remove candidates -- "Johnson, Gary", "Stein, Jill", "McMullin, Evan"
+IDs_to_remove = c("P20002671", "P20003984", "P60022654")
+df <- subset(df, !(cand_id %in% IDs_to_remove))
+
+# Identify Democrat candidates
+democrats_cand_ids = c("P00003392", "P60007168", 
+                       "P60007671", "P60009685", 
+                       "P60008885") 
+
+# Function to get the party name
+get_party <- function(candidate_id) {
+  ifelse(candidate_id %in% democrats_cand_ids, "Democrats", "Republicans")
+}
+
+# Candidates to Party mapping 
+candidates <- df %>% 
+                group_by(cmte_id, cand_id, cand_nm) %>% 
+                summarise(cnt = n())
+candidates$party <- candidates$cand_id %>% get_party()
+
+# Add party data to the data frame joining candidates & main dataframe
+nrows = nrow(df)
+df <- inner_join(df, candidates, by = c("cmte_id", "cand_id", "cand_nm"))
+df <- mutate(df, pct_counts = round((cnt * 100 / nrows), 2))
+df$party <- factor(df$party, levels = c("Democrats", "Republicans"))
+
+head(df, 2)
+```
+
+### Audit Zip Codes
+
+There are a lot of zip codes that are not correctly represented in the dataset. The US zipcode is a five-digit numeric value. There are some zipcodes having 9-digit values. After examining manually I can see that these zipcodes are correct with first 5 digits. I will convert them from 9-digit to 5-digit correct zipcode.
+
+As we are working with California dataset only, we need to check if zipcodes are within CA zipcode boundaries or not. The zip code boundary for CA is 900XX - 961XX.
+
+https://en.wikipedia.org/wiki/ZIP_Code#/media/File:ZIP_Code_zones.svg
+
+```{r audit_zip_codes}
+# Some Zipcodes are more than 5 digits
+# Correcting them to be in 5-digit limit
+df$contbr_zip <- substr(df$contbr_zip, 1, 5)  
+
+# Audit Zip code boundaries -- For CA the boundary is from 
+# 900 to 961
+audit_zip_code_boundaries <- function(zipcode) {
+  s <- substr(zipcode, 1, 3)
+  ifelse(s >= 900 & s <= 961, T, F)
+} 
+
+# Find invalid zip codes
+zips_to_be_corrected <- subset(df, 
+                               !df$contbr_zip %>% 
+                                 audit_zip_code_boundaries())
+zips_to_be_corrected <- subset(zips_to_be_corrected, !(contbr_city == ""))
+head(zips_to_be_corrected, 2)
+```
+
+### Get Zip codes from Google
+
+I will correct the zip codes using the address/city. I will use google maps API to fetch zip code data for the address. If not found from Google will keep it as NA.
+
+Below function will get zip code using Google API from the address.
+
+```{r get_missing_zips_from_google}
+# Function to find the invalid zip codes from Google
+# using the Google gecode API for locations
+
+# Dictionary to keep track of already fetched city zips
+# It will faster the performance without hitting Google
+# every time & also will minimize the requests as the 
+# limit of free request per day is 1,500
+memo <- dict()
+
+# Function -- Start
+get_zip_from_google <- function(address) {
+  zip <- NA
+  city <- address
+  if (address %in% memo$keys()) { # ZIP already fetched for location
+    zip <- memo$get(address)
+  }
+  else {
+    # Handle spaces within the address so that it can be a valid request
+    address <- str_replace_all(address, pattern = " ", replacement = "%20")
+    address <- sprintf("%s,%s", address, "CA")
+    
+    # Request API Base URL
+    GOOGLE_API_URL <- "https://maps.googleapis.com/maps/api/geocode/json"
+    
+    # API KEY to access the API -- Need to Setup 
+    API_KEY <- "AIzaSyBrBWQgxxj8s40Ht8nUXqZnmFFNIJIx5GY"
+    
+    # URL to request Location details
+    REQUEST_URL <- sprintf("%s?address=%s&key=%s", 
+                           GOOGLE_API_URL, address, API_KEY)
+    
+    # Get the HTTP Response
+    r <- GET(url = REQUEST_URL)
+    if(status_code(r) == 200) { # Proceed if return code is 200
+      r <- httr::content(r)
+      if(r$status == "OK") { # Proceed if HTTP Status is OK
+        # Get address summary 
+        s <- r$results[[1]]$formatted_address  
+        
+        # Extract digits[Road, ZIP code(if any)]
+        zip <- stri_extract_all_regex(s, "[0-9]+")    
+        zip <- strsplit(zip[[1]], split = " ")        
+        zip <- zip[[length(zip)]]
+        
+        if(nchar(zip) != 5 | is.na(zip)) {
+          zip <- NA
+        }
+        else {
+          if(!audit_zip_code_boundaries(zip)) {
+            zip <- NA
+          }
+        }
+        memo[[city]] <- zip # Save the location zip code
+      }
+    }
+  }
+  
+  zip     # Return the zip code
+}
+```
+
+```{r add_missing_zips}
+# Fetch zipcodes for all locations where zip code is missing
+zip_code <- lapply(
+                as.character(zips_to_be_corrected$contbr_city), 
+                get_zip_from_google
+              )
+zips_to_be_corrected$contbr_zip <- as.integer(zip_code)
+
+df[c(rownames(zips_to_be_corrected)), ]$contbr_zip <- 
+  zips_to_be_corrected$contbr_zip
+head(df[c(rownames(zips_to_be_corrected)), ], 2)
+```
+
+### Add contributor gender to the dataset
+
+Guess the gender of the contributor from the name using gender package.
+
+```{r get_gender}
+# Using the person's first name and gender package
+# that contains gender data for first name to 
+# I will guess the gender
+memo <- dict()
+memo_gender <- dict()
+
+# Function to get first name of the contributor
+get_fname <- function(name) {
+  if (name %in% memo$keys()) {
+    fname <- memo$get(name)
+  }
+  else {
+    fname <- tryCatch( {
+      str_split(name, ",")[[1]][[2]]
+      }, error = function(e) {
+        fname <- NA
+        memo[name] <- fname
+      }
+    )
+    
+    fname <- gsub("^\\s+|\\s+$", "", fname)
+    fname <- str_split(fname, " ")[[1]][[1]]
+    memo[name] <- fname
+  }
+  fname
+}
+
+# Function to get gender of the person using first name
+get_gender <- function(name) { 
+  if (name %in% memo_gender$keys()) {
+    gender <- memo_gender$get(name)
+  } 
+  else {
+    gender <- gender(name)[["gender"]]
+    gender <- ifelse(length(gender) == 0, NA, gender)
+    memo_gender[name] <- name
+  }
+  gender
+}
+```
+
+```{r add_gender}
+df$contrb_fn <- sapply(df$contbr_nm, get_fname)
+contrb_f_names <- data_frame(unique(df$contrb_fn))
+names(contrb_f_names) <- "first_name"
+
+contrb_f_names$gender <- sapply(contrb_f_names$first_name, get_gender)
+
+df <- merge(df, contrb_f_names, 
+            by.x = "contrb_fn", by.y = "first_name", all.y = T)
+```
+
+### Add employment status as summary 
+
+Summerise the employment status as "Employed" or "Not-Employed" as derived from occupation information.
+
+```{r employment_status}
+# Function to categorise the employment status
+# using the occupation information available
+get_employment_status <- function(s) {
+  s <- toupper(s)
+  r <- "EMPLOYED"
+  if(is.na(s))
+  {
+    r <- "NO DATA"
+  }
+  if(s %in% c("N/A", "NA", "NONE", "", "NO", "DISABLED")) {
+    r <- "NO DATA"
+  }
+  if(grepl("INFORMATION", s) == TRUE) {
+    r <- "NO DATA"
+  }
+  if(grepl("NOT", s) == TRUE & grepl("EMPLOYED", s) == TRUE) {
+    r <- "NOT EMPLOYED"
+  }
+  if(grepl("SELF", s) == TRUE) {
+    r <- "SELF-EMPLOYED"
+  }
+  if(grepl("BUSINESS", s) == TRUE) {
+    r <- "BUSINESS"
+  }
+  if(grepl("RETIRE", s) == TRUE) {
+    r <- "RETIRED"
+  }
+  
+  r
+}
+
+df$contbr_employment_status <- 
+  factor(sapply(df$contbr_occupation, get_employment_status), 
+                   levels = c("BUSINESS", "SELF-EMPLOYED", "EMPLOYED", 
+                              "RETIRED", "NOT EMPLOYED", "NO DATA"
+                            )
+                )
+```
+
+### Working data -- First 1000 records
+
+```{r working_data}
+DT::datatable(df %>% head(1000))
+```
+
+### Plot Missing data Summary
+
+```{r missing_data}
+# Plot Missing data counts
+missing_pct <- 
+  sapply(df, 
+          function(x) { 
+              round((sum(is.na(x)) / length(x)) * 100, 2) 
+          }
+         ) 
+
+missing_pct <- missing_pct[missing_pct > 0]
+missing_pct <- 
+  data.frame(features = names(missing_pct),
+             missing_percent = missing_pct,
+             row.names = c()
+            )
+
+ggplot(data = missing_pct, 
+       aes(x = reorder(features, missing_percent), y = missing_percent)
+       ) +
+  geom_bar(stat = "identity", aes(fill = missing_percent), 
+           alpha=0.85, show.legend = T
+           ) +
+  geom_text(aes(x = reorder(features, missing_percent), 
+                y = 0.05, label = missing_percent),
+    hjust=0., vjust=0.55, size = 6, colour = 'blue') +
+  scale_fill_gradient("missing %", low = "#ECA545", high = "#D62E17") +
+  ggtitle("Percent of missing data values by feature") +
+  xlab("") + ylab("% of missing features") +
+  coord_flip()
+```
+
+<div id="univariate_plots">
+## 3. Univariate Plots Section
+</div>
+In this section each feature will be analysed independently.
+
+### Plot donation counts for the parties
+
+```{r party_count}
+ggplot(data = df, aes(x = party)) +
+  geom_bar(aes(fill = party), alpha = 0.85, show.legend = F) +
+  scale_y_continuous(labels = comma) +
+  scale_fill_manual(values = 
+                      c("Republicans" = "#F33C4A", 
+                        "Democrats" = "#3D60EF")
+                  ) +
+  ggtitle("Total Donation counts by party") 
+```
+
+### Plot donation counts for the candidates
+Most of the donations are towards Democrats. There are some candidates who received very less donations and these counts are not even visible in the bar plot. 
+
+```{r donation_per_candidate}
+candidates <- candidates %>% arrange(desc(cnt)) 
+df$cand_nm <- factor(df$cand_nm, levels = candidates$cand_nm)
+
+ggplot(data = candidates, aes(x = reorder(cand_nm, -cnt), y = cnt)) +
+  geom_bar(aes(fill = party), stat = "identity", alpha = 0.85) +
+  scale_y_continuous(labels = comma) +
+  scale_fill_manual(values = 
+                      c("Republicans" = "#F33C4A", 
+                        "Democrats" = "#3D60EF")
+                    ) +
+  ggtitle("Total Donation counts by candidates") +
+  xlab("Candidates") +
+  ylab("Count") +
+  theme(axis.text.x = element_text(angle = 90)) 
+```
+
+Log Transformation of the previous bar plot to display candidates with less number of donations received.
+
+```{r donation_per_candidate_log}
+ggplot(data = candidates, aes(x = reorder(cand_nm, -cnt), y = cnt)
+      ) +
+  geom_bar(aes(fill = party), stat = "identity", alpha = 0.85) +
+  scale_y_continuous(labels = comma, 
+                     breaks = c(0, 200, 500, 1000, 2000, 
+                                4000, 10000, 20000, 600000)
+                     ) +
+  coord_trans(y="log1p") +
+  scale_fill_manual(values = 
+                      c("Republicans" = "#F33C4A", 
+                        "Democrats" = "#3D60EF")
+                    ) +
+  ggtitle("Donation counts by candidates -- Log Scale") +
+  xlab("Candidates") +
+  ylab("Count") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+
+### Plot donation counts by genders
+
+```{r gender_count}
+df$gender <- factor(df$gender, levels = c("male", "female"))
+
+ggplot(data = subset(df, !is.na(df$gender)), aes(x = gender)) +
+  geom_bar(aes(fill = gender), alpha = 0.85, show.legend = F, width = 0.6) +
+  scale_y_continuous(labels = comma) +
+  scale_fill_manual(values = c("female" = "#F31FE5", 
+                               "male" = "#3E3EF5")
+                  ) +
+  ggtitle("Total Donation Counts by Gender") +
+  xlab("Gender") 
+```
+
+### Plot donation counts by months
+The below chart will show the total donation counts by months of 2016. I am not including other dates earlier than 2016.
+
+```{r}
+df$contb_receipt_dt <- df$contb_receipt_dt %>% as.Date("%d-%b-%y")
+df$month <- format(as.Date(df$contb_receipt_dt), "%b-%y")
+
+# Only interested in donations made in 2016
+position = c("Jan-16", "Feb-16", "Mar-16", "Apr-16", 
+             "May-16", "Jun-16", "Jul-16", "Aug-16",  
+             "Sep-16", "Oct-16", "Nov-16", "Dec-16")
+df$month <- as.factor(df$month)
+
+p <- ggplot(df %>% filter(contb_receipt_dt >= as.Date("2016-01-01")), 
+            aes(x = factor(month, levels = position))) +
+      geom_bar(aes(fill=..count..), na.rm = T, alpha = 0.85) +
+      scale_fill_gradient("Contribution Count", 
+                          low = "#ECA545", high = "#D62E17") +
+      xlab("Months") +
+      ggtitle("Barplot of Contributions by Months of 2016") +
+      theme(axis.text.x = element_text(angle = 90)) 
+
+p 
+```
+
+### Histogram of contributed amounts
+
+The histogram shows there are a lot of contribution amounts lesser than 0, and most of the contributions is lesser than 300. Again the barplot below shows outliers started at 1500 but there are a lot of donations made above 1500 and I will not remove them as they might represent donations from people with strong socio-economic status.
+
+```{r hist_contribs}
+p <- ggplot(data = df, aes(x = contb_receipt_amt)) + 
+      geom_histogram(binwidth = 15, fill='#F5B041', color="#34495E") +
+      geom_freqpoly(binwidth = 15, color = '#D928BC') +
+      scale_y_continuous(labels = comma) +
+      coord_trans(limx = c(-100, 1100)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Contribution Amounts")
+p
+```
+
+```{r hist_contribs_box_plot}
+p1 <- ggplot(subset(df,contb_receipt_amt>0), 
+             aes(x = contb_receipt_amt)) + 
+      geom_histogram(bins = 30, fill='#F5B041', color="#34495E") +
+      scale_x_log10(labels = comma) + 
+      scale_y_continuous(labels = comma) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Contribution Amounts")
+
+p2 <- ggplot(aes(x=1, y=contb_receipt_amt), 
+          data = subset(df,contb_receipt_amt>0)) +
+        geom_boxplot(fill='#F5B041', color="#34495E",
+                      outlier.fill = 'blue',
+                      outlier.shape = 1,
+                      outlier.size = 0.5,
+                      outlier.alpha = 0.5
+                    ) +
+        # To display mean per gender
+        stat_summary(fun.y = mean, geom = "point", size = 1, 
+                   color = 'blue') +
+        scale_y_log10(labels = comma,
+                      breaks = c(-10, 0, 5, 10, 20, 40, 100, 
+                                 500, 1500, 2000, 5000)  
+                    ) +
+        xlab("") +
+        ylab("Contribution Amount in $") +
+        ggtitle("Boxplot of contribution Amounts") +
+        theme(axis.text.x = element_blank(),
+              axis.ticks.x = element_blank())
+
+grid.arrange(p1, p2, nrow = 1)
+```
+
+Checking only amounts lesser than 0. There is not much clarity on these data. Most problem they corresponds to refunds made towards donators.
+
+```{r neg_hist_contribs}
+p <- ggplot(data = subset(df, df$contb_receipt_amt <= 0), 
+            aes(x = contb_receipt_amt)
+          ) + 
+      geom_histogram(binwidth = 10, fill='#F5B041', color="#34495E") +
+      geom_freqpoly(binwidth = 10, color = '#D928BC') +
+      coord_trans(limx = c(-350, 0)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Negative Contribution Amounts")
+p
+```
+
+
+### Distribution of contributed amounts
+Distribution of contribution amount is not following normal distribution. Vertical line shows the median.
+
+```{r dist_contribs}
+p <- ggplot(data = df, aes(x = contb_receipt_amt)) + 
+      stat_density(fill='#F5B041', color="#34495E") +
+      geom_vline(aes(xintercept=median(contb_receipt_amt)),
+        colour='#3A8C2C', linetype='dotted', lwd=0.5) +
+      coord_trans(limx = c(-100, 300)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Distribution of Contribution Amounts")
+p
+```
+
+### Histogram of contributed amounts -- Log Scale
+
+```{r hist_contribs_log}
+p <- ggplot(data = subset(df, df$contb_receipt_amt > 0), 
+            aes(x = contb_receipt_amt)
+          ) + 
+      geom_histogram(binwidth = 0.25, fill='#F5B041', color="#34495E") +
+      geom_freqpoly(binwidth = 0.25, color = '#D928BC') +
+      scale_x_log10(limits = c(1, 300), 
+                    breaks = seq(0, 300, 30)) +
+      scale_y_continuous(labels = comma) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Contribution Amounts - Log Scale")
+p
+```
+
+### Distribution of contributed amounts - Log Scale
+After applying log transformation this is not following normal distribution. Vertical lines shows the median.
+
+```{r dist_contribs_log}
+p <- ggplot(data = df, aes(x = contb_receipt_amt)) + 
+      stat_density(fill='#F5B041', color="#34495E") +
+      geom_vline(aes(xintercept=median(contb_receipt_amt)),
+        colour='#3A8C2C', linetype='dotted', lwd=0.5) +
+      scale_x_log10(limits = c(1, 300), 
+                    breaks = seq(0, 300, 30)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Distribution of Contribution Amounts - Log Scale")
+p
+```
+
+### Histogram of contributed amounts -- SQRT Scale
+
+```{r hist_contribs_sqrt}
+p <- ggplot(data = subset(df, df$contb_receipt_amt >= 0), 
+            aes(x = contb_receipt_amt)
+          ) + 
+      geom_histogram(binwidth = 1, fill='#F5B041', color="#34495E") +
+      scale_x_sqrt(limits = c(0, 300), breaks=seq(0, 300, 30)) +
+      scale_y_continuous(labels = comma) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Contribution Amounts - SQRT Scale")
+p
+```
+
+### Distribution of contributed amounts -- SQRT scale
+After applying SQRT transformation this is not following normal distribution. Vertical line shows the median.
+
+```{r dist_contribs_sqrt}
+p <- ggplot(data = subset(df, df$contb_receipt_amt >= 0), 
+            aes(x = contb_receipt_amt)
+          ) + 
+      stat_density(fill='#F5B041', color="#34495E") +
+      geom_vline(aes(xintercept=median(contb_receipt_amt)),
+        colour='#3A8C2C', linetype='dotted', lwd=0.5) +
+      scale_x_sqrt(limits = c(1, 300), 
+                    breaks = seq(0, 300, 50)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Distribution of Contribution Amounts - SQRT Scale")
+p
+```
+
+### Distribution of contributed amounts -- Cuberoot scale
+After applying cuberoot transformation this is not following normal distribution. Vertical line shows the median.
+
+```{r dist_contribs_cuberoot}
+cuberoot_trans <- 
+  function() trans_new('cuberoot', transform = function(x) x^(1/3),
+                                      inverse = function(x) x^3)
+
+p <- ggplot(data = subset(df, df$contb_receipt_amt >= 0), 
+            aes(x = contb_receipt_amt)
+        ) + 
+      stat_density(fill='#F5B041', color="#34495E") +
+      geom_vline(aes(xintercept=median(contb_receipt_amt)),
+        colour='#3A8C2C', linetype='dotted', lwd=0.5) +
+      scale_x_continuous(limits = c(0, 300), trans = cuberoot_trans(),
+                    breaks = seq(0, 300, 50)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Distribution of Contribution Amounts - Cuberoot Scale")
+p
+```
+
+### Distribution of contributed amounts -- sqrt-log scale
+After applying custom(sqrt-log) transformation this is not following normal distribution.
+
+```{r dist_contribs_sqrt_log}
+sqrt_log_trans <-
+  function() trans_new('sqrtlog', 
+                       transform = function(x) (log10(sqrt(x) + 1)),
+                       inverse = function(z) ((10^z - 1)^2)
+                )
+
+p <- ggplot(data = subset(df, df$contb_receipt_amt >= 0), 
+            aes(x = contb_receipt_amt)
+          ) + 
+      stat_density(fill='#F5B041', color="#34495E") +
+      geom_vline(aes(xintercept=median(contb_receipt_amt)),
+        colour='#3A8C2C', linetype='dotted', lwd=0.5) +
+      scale_x_continuous(limits = c(0, 300), trans = sqrt_log_trans(),
+                    breaks = seq(0, 300, 50)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Distribution of Contribution Amounts - Log(SQRT)")
+
+p
+```
+
+### Plot Donation counts by Employment Status
+
+```{r plot_employment_status}
+p <- ggplot(df, aes(x = contbr_employment_status)) +
+      geom_bar(aes(fill = contbr_employment_status), show.legend = F) +
+      scale_y_continuous(labels = comma) +
+      xlab("") +
+      ggtitle("Barplot of Contributions by Employments") +
+      theme(legend.position = "none")
+p 
+```
+
+### Contributions by File_Num
+
+```{r}
+contrib_by_file_num <- 
+  df %>% 
+  select(file_num, party, contb_receipt_amt) %>%
+  group_by(file_num, party) %>%
+  summarise(count = n(), total_contribution = sum(contb_receipt_amt),
+            avg_contribution = mean(contb_receipt_amt)
+            ) %>%
+  arrange(party)
+
+DT::datatable(contrib_by_file_num)
+```
+
+### Add county information along with the zipcode so that the analysis can be done at a region level
+
+```{r add_zip_to_df}
+# Use ZIPCODE package to add latitude & longitude data for California
+# This will help us to plot data points on a map 
+data("zipcode")
+ca_zips <- zipcode %>% filter(state == "CA") 
+ca_zips <- setorder(setDT(ca_zips), city, -zip)[, head(.SD, 1), by = city]
+ca_zips$city <- toupper(ca_zips$city)
+
+## Add County Information
+ca_county_data <- map_data("county", region = "california")
+ca_county_boundaries <- 
+  ca_county_data %>% group_by(group, region, subregion) %>% 
+  summarise(min_long = min(long), 
+            max_long = max(long), 
+            min_lat = min(lat), 
+            max_lat = max(lat)
+          )
+
+# Function to find country information & 
+# latitude & longitude boundaries so that 
+# density plot can be created
+get_county <- function(long, lat, city) {
+	rec <- head(ca_county_boundaries %>% 
+	              filter(long >= min_long & 
+	                       long <= max_long & 
+	                       lat >= min_lat & 
+	                       lat <= max_lat), 
+	            1)
+	if(nrow(rec) == 1) {
+		r <- paste(rec$subregion, "County")
+	}
+	else { # Add missing county names using Google Geo code API
+	  GOOGLE_API_URL <- 
+		      "https://maps.googleapis.com/maps/api/geocode/json"
+    API_KEY <- "AIzaSyBrBWQgxxj8s40Ht8nUXqZnmFFNIJIx5GY"
+    REQUEST_URL <- sprintf("%s?address=%s&key=%s", 
+                           			GOOGLE_API_URL, city, API_KEY)
+
+		res <- GET(url = REQUEST_URL)
+		
+		if(status_code(res) == 200) {
+      res <- httr::content(res)
+      if(res$status == "OK") {
+        # Get address summary in a word
+        res <- res$results[[1]]$address_components[[2]]$short_name
+      }
+      else {
+        res <- NA
+      }
+		}
+		else {
+		  res <- NA
+		}
+		r <- res
+	}
+	r
+}
+
+ca_zips$county <- unlist(mapply(get_county, 
+                                ca_zips$longitude, 
+                                ca_zips$latitude, 
+                                ca_zips$city)
+                         )
+
+# Update manually few cities left
+ca_zips[ca_zips$city == "SANTA PAULA"]$county <- 
+  "Ventura County"
+ca_zips[ca_zips$city == "MOSS BEACH"]$county <- 
+  "San Mateo County"
+ca_zips[ca_zips$city == "PEBBLE BEACH"]$county <- 
+  "Monterey County"
+ca_zips[ca_zips$city == "PORT HUENEME"]$county <- 
+  "Ventura County"
+ca_zips[ca_zips$city == "SIMI VALLEY"]$county <- 
+  "Ventura County"
+ca_zips[ca_zips$city == "SANTA BARBARA"]$county <- 
+  "SANTA BARBARA County"
+
+ca_zips$county <- toupper(ca_zips$county)
+
+temp <- ca_county_data %>% select(group, subregion) %>% distinct()
+temp$subregion <- toupper(paste(temp$subregion, "county"))
+names(temp) <- c("group", "county")
+ca_zips <- inner_join(ca_zips, temp, by="county")
+
+df$contbr_city <- sapply(df$contbr_city, 
+                function(s) { str_split(s, pattern = ",")[[1]][[1]] } )
+df <- merge(df, ca_zips, by.x = "contbr_city", by.y = "city", all.x = T)
+```
+
+### Plot Contributions by zip codes
+
+```{r plot_map}
+# Download the map as black & white and with 
+# zoom level to display the state of California only.
+map <- get_map("california, usa", zoom = 6, 
+                                maptype = "roadmap", 
+                                source = "google",
+                                color = "bw"
+                )
+
+ggmap(map) +
+  geom_point(data = df %>% filter(contb_receipt_amt >= 0), 
+             aes(x = longitude, y = latitude), 
+             show.legend = T,
+             alpha = 0.1,
+             size = 0.2,
+             na.rm = T
+             ) +
+  ggtitle("Distribution of donations across the State Zips")
+```
+
+### Density Plot of Contributions by Counties
+The plot below shows the donations aggregated for each county so that we can cover a larger region rather than just concentrating on zipcode which appears to be nothing more than a point in the Map.
+
+It can be clearly seen how the donations were made across counties. It's clear that coastal counties & southern counties accounted for most of the donations.
+
+```{r plot_county_density}
+ca_county_data <- map_data("county", region = "california")
+temp <- 	df %>% filter(!is.na(group)) %>%
+    group_by(group) %>% 
+		summarise(donation_counts_by_county = n(), 
+			total_donations_by_county = sum(contb_receipt_amt), 
+			avg_donations_by_county = mean(contb_receipt_amt)
+		)
+
+ca_county_data <- inner_join(ca_county_data, temp, by = "group")
+
+ggplot(ca_county_data, aes(long, lat, group = group)) +
+	geom_polygon(colour = alpha("black", 1 / 2), size = 0.5) +
+	geom_polygon(aes(fill = donation_counts_by_county)) +
+	coord_fixed() +
+	theme_minimal() +
+	ggtitle("Total Donations counts by Counties of CA") +
+	    theme(axis.line = element_blank(), axis.text = element_blank(),
+	         axis.ticks = element_blank(), axis.title = element_blank()
+	         ) +
+    	scale_fill_viridis(option="viridis", direction = -1, name = "Donation Counts", labels = comma)
+```
+
+
+<div id="univariate_analysis">
+## 4. Univariate Analysis
+</div>
+
+### Structure of dataset
+There are a lot of donations received across California. The dataset provided was having some interesting features like candidate, contributor information(like name, employment/occupation information), contribution information(amount, date), city & zipcode information etc. 
+
+Some features are generated using the information available like gender of the person, contribution towards parties, lat-long information using zipcode, employment status.
+
+Other observations about the dataset:
+
+- Most people contributed towards Democrats
+- There are a lot of contributions having value less than 0 which seems a little awkward. Maybe these are refunds requested(as seen from the receipt description) for previous donations made or maybe change provided when amounts paid in cash. Most of the people are retired where the contribution amount is less than 0. There is no clarity on this and it will better to ignore these records.
+
+### What are the main features of interest in the dataset ?
+There are a number of features provided. The main features are party, candidate, donation timelines, cities/zips, contributor gender & employment status.
+
+I believe contribution is majorly depends on the contributor itself. People can have various kinds of expectations while electing a candidate. The expectations are different from person to person. As unemployed people can have different expectations from a person who is having some business. So employment status of a person is a key factor. Again the gender of person can have some influence as females can have some different set of expectations from the male voters.
+
+Party is a key factor as there is general tendency for some portion of the population to vote for party rather than giving much importance towards the candidate.
+
+Candidate background can have big influence on the people. As, Hillary Clinton had a good political background and that can help people vote towards her. Again origin of descent can have some influence as Hillary is from Chicago, Illinois; and won in Illinois. On the other hand, Donald Trump is a huge background in business, and not much in politics. This can help a lot of people connected with business or self-employment to vote for him.
+
+Cities can have some influence as generally noticed few areas will have some inclination towards some party.
+
+Donation timelines is also very important as people will tend to donate much more while election is close.
+
+### Did you create any new variables from existing variables in the dataset?
+I created a number of variables like employment status, gender, party, latitude-longitude to gain some more insights during analysis.
+
+### What is the goal of the analysis ?
+The analysis focuses on various factors that can influence a person to contribute & maybe later vote for a party/candidate.
+
+### Of the features you investigated, were there any unusual distributions? Did you perform any operations on the data to tidy, adjust, or change the form of the data? If so, why did you do this?
+Contribution amount was left skewed and looked non-normal. I performed various kinds of transformation for reaching to a almost normal case. But these transformed distributions were non-normal too. 
+
+I did not exclude refunds as of now as did not have any clarity on these. I will analyse the negative contributions in detail. To remove outliers I remove contributions over the allowable limit for an individual ($2,700). 
+
+I did not do any formatting of the data as the dataset is already in a tidy data format.
+
+<div id="bivariate_plots">
+## 5. Bivariate Plots Section
+</div>
+
+### Pair-Plot of the variables
+
+```{r pair_plot}
+# sample 10,000 contributions from the data set
+set.seed(10000)
+dfh <- 
+  df %>% 
+  filter(contb_receipt_dt >= as.Date('2016-01-01') & !is.na(gender)) %>% 
+  select(contbr_employment_status, gender, month, 
+         party, contb_receipt_amt) %>% 
+  head(10000)
+dfh$month <- factor(dfh$month, levels = position)
+
+# pair plot
+ggpairs(dfh,
+        lower = list(continuous = wrap("points", shape = I('.'))), 
+        upper = list(combo = wrap("box", outlier.shape = I('.'))))
+```
+
+### Plot donations received by candidates
+Democrats and Hillary received most number of donations & the amount received is significantly higher than Republicans & Trump.
+
+```{r plot_donation_by_candidate}
+candidate_data <- df %>% 
+              group_by(cand_nm, party) %>% 
+              summarise(count=n(), 
+                        contributions_received_in_M = 
+                          round(sum(contb_receipt_amt)/1000000, 2)
+                      ) %>%
+              arrange(desc(count))
+candidate_labels <- sapply(str_split(candidate_data$cand_nm, ","), "[[", 1)
+candidate_colors <- 
+  ifelse(candidate_data$party == 'Democrats', "#3D60EF", "#F33C4A")
+
+party_data <- candidate_data %>% 
+              group_by(party) %>% 
+              summarise(count=sum(count), 
+                        total_contributions_received_in_M = 
+                          sum(contributions_received_in_M)
+                      )
+
+
+p <- plot_ly() %>%
+  add_pie(candidate_data, 
+          labels = ~candidate_labels, 
+          values = ~candidate_data$count, 
+          type = 'pie', 
+          hole = 0.5,
+          textinfo = 'label+percent',
+          insidetextfont = list(color = '#FFFFFF'),
+          hoverinfo = 'text',
+          text = ~paste('Total contributions by ', 
+                        format(candidate_data$count, big.mark =','), 
+                        ' persons'),
+          marker = list(colors = candidate_colors,
+                        line = list(color = '#FFFFFF', width = 1)),
+          showlegend = F,
+          domain = list(x = c(0, 0.45), y = c(0.0, 1))
+        ) %>%
+  add_pie(party_data,
+          labels = ~party_data$party,
+          values = ~party_data$count,
+          textinfo = 'label+percent',
+          insidetextfont = list(color = '#FFFFFF'),
+          hoverinfo = 'text',
+          text = ~paste('Total contributions by ',
+                        format(party_data$count, big.mark =','),
+                        ' persons'),
+          marker = list(colors = c('#3D60EF', '#F33C4A'),
+                      line = list(color = '#FFFFFF', width = 1)),
+          showlegend = F,
+          domain = list(x = c(0.55, 1), y = c(0.0, 1))
+          ) %>%
+  layout(title = '2016 US Presidential Campaign Finance Counts(State - CA)',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, 
+                      showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, 
+                      showticklabels = FALSE)
+         ) 
+p
+```
+
+
+```{r plot_donation_amt_by_candidate}
+p <- plot_ly() %>%
+  add_pie(candidate_data, 
+          labels = ~candidate_labels, 
+          values = ~candidate_data$contributions_received_in_M, 
+          type = 'pie', 
+          hole = 0.5,
+          textinfo = 'label+percent',
+          insidetextfont = list(color = '#FFFFFF'),
+          hoverinfo = 'text',
+          text = ~paste('Total contributions $ ', 
+                        format(candidate_data$contributions_received_in_M, 
+                               big.mark =','), 
+                        ' Millions'),
+          marker = list(colors = candidate_colors,
+                        line = list(color = '#FFFFFF', width = 1)),
+          showlegend = F,
+          domain = list(x = c(0, 0.45), y = c(0.0, 1))
+        ) %>%
+  add_pie(party_data,
+          labels = ~party_data$party,
+          values = ~party_data$total_contributions_received_in_M,
+          textinfo = 'label+percent',
+          insidetextfont = list(color = '#FFFFFF'),
+          hoverinfo = 'text',
+          text = ~paste('Total contributions $ ',
+                        format(party_data$total_contributions_received_in_M, 
+                               big.mark =','),
+                        ' Millions'),
+          marker = list(colors = c('#3D60EF', '#F33C4A'),
+                      line = list(color = '#FFFFFF', width = 1)),
+          showlegend = F,
+          domain = list(x = c(0.55, 1), y = c(0.0, 1))
+          ) %>%
+  layout(title = '2016 US Presidential Campaign Finance Amounts(State - CA)',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, 
+                      showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, 
+                      showticklabels = FALSE)
+         ) 
+p
+```
+
+### Contributions summary towards parties
+Republicans have a much higher average & median contribution.
+
+```{r}
+df %>% 
+  group_by(party) %>%
+  summarise(avg_contribution = mean(contb_receipt_amt),
+            max_contribution = max(contb_receipt_amt),
+            min_contribution = min(contb_receipt_amt),
+            median_contribution = median(contb_receipt_amt),
+            IQR = IQR(contb_receipt_amt),
+            count = n()
+          )
+```
+
+### Contribution in negative
+
+There are a number of contributions that have a negative value. It probably means refund towards earlier contribution made(cancellation of contribution made earlier) or change given to the person. Example, A person wishes to Pay $96, and pays $100, and received $4 in return. We can not ignore this negative values.
+
+If the dataset is examined carefully we can see there is field named "file_num", and it might record for negative amounts.
+
+### Analyse negative donation amounts by Party
+I can see that the Republicans were received more negative amounts.
+
+```{r neg_donation_by_party}
+dfx <- df %>% filter(contb_receipt_amt < 0)
+p <- ggplot(data = dfx, aes(x = contb_receipt_amt, fill = party)) + 
+      geom_histogram(binwidth = 10, 
+                     position = "dodge") +
+      coord_trans(limx = c(-100, 20)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Negative Contribution Amounts to Parties") +
+      scale_fill_manual(values = 
+                          c('Democrats' = '#3D60EF', 
+                            'Republicans' = '#F33C4A')
+                      ) 
+p
+```
+
+### Analyse negative donation amounts by contribution employment
+I can see a good number of employed people have donation amounts as negative. As around 60% of the records are of employed persons we can expect a good number of negative amounts having negative ammount.
+There are very high number of Retired people making negative donations. 
+
+```{r neg_donation_by_employment}
+dfx <- df %>% filter(contb_receipt_amt < 0)
+p <- ggplot(data = dfx, 
+            aes(x = contb_receipt_amt, fill = contbr_employment_status)
+            ) + 
+      geom_histogram(binwidth = 50, 
+                     position = "dodge") +
+      coord_trans(limx = c(-200, 30)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Negative Contribution Amounts to Parties") +
+      scale_fill_brewer(palette = "Set1", name = "Employment Status") 
+      
+p
+```
+
+### Contributions by parties
+It's clearly seen that Democarats received much more contributions.
+
+```{r contribution_by_parties}
+p <- ggplot(data = df, aes(x = contb_receipt_amt, fill=party)) + 
+      geom_histogram(binwidth = 25) +
+      scale_y_continuous(labels = comma) +
+      scale_x_continuous(breaks = seq(-100, 400, 100)) +
+      coord_trans(limx = c(-100, 500)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Contribution Amounts to Parties") +
+      scale_fill_manual(values = 
+                          c('Democrats' = '#3D60EF', 
+                            'Republicans' = '#F33C4A')
+                      ) +
+      theme(axis.text.x = element_text(angle = 90)) +
+      facet_grid(~party)
+p
+```
+
+There is not much correlation between party & contribution amounts.
+
+```{r contrib_by_party_corr}
+rcorr(df$party, df$contb_receipt_amt, type = "spearman")
+```
+
+### Contribution by gender
+Contributions does not vary much when compared by genders. Males have slightly higher contribution average, median, and IQR values as compared to females.
+
+```{r contrib_by_gender}
+p <- ggplot(data = subset(df, !is.na(df$gender)), 
+            aes(x = contb_receipt_amt)
+           ) + 
+      geom_histogram(binwidth = 15, aes(fill = gender), alpha=0.75) +
+      scale_y_continuous(labels = comma) +
+      scale_x_continuous(breaks = seq(-100, 400, 100)) +
+      coord_trans(limx = c(-100, 500)) +
+      scale_fill_manual(values = 
+                          c("female" = "#F31FE5", 
+                            "male" = "#3E3EF5")
+                        ) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Contribution Amounts by Genders") +
+      theme(axis.text.x = element_text(angle = 90)) +
+      facet_grid(~gender)
+p
+```
+
+Boxplot to show how the donation ranges differ with the gender. The orange dot shows the average donation per gender. Males have slightly better average contribution as compared to females.
+
+
+```{r contribution_by_gender_boxplot}
+p <- ggplot(data = subset(df, !is.na(gender)),
+            aes(x = gender, y = contb_receipt_amt)
+          ) + 
+      geom_boxplot(aes(fill = gender),
+                     outlier.colour = "blue",
+                     outlier.size = 0.25,
+                     outlier.alpha = 0.25,
+                     alpha=0.75
+                     ) +
+      # To display mean per gender
+      stat_summary(fun.y = mean, geom = "point", size = 2, 
+                   color = 'orange') +
+      scale_y_continuous(limits=c(-100,300), 
+                         breaks=seq(-100,300, 50), 
+                         expand = c(0, 0)
+                        ) +
+      ylab("Contribution Amount in $") +
+      ggtitle("Boxplot of Contribution Amounts by Gender") +
+      scale_fill_manual(values = 
+                          c("female" = "#F31FE5", 
+                            "male" = "#3E3EF5")
+                        ) 
+
+p
+```
+
+### T-Test to find if male contributions are different than female contributions
+
+I wil try to find out t-test results for all the contributions within 0 - 1500 for males & females.
+
+H0 : Males average contribution is same as that of females.
+H1 : Males average contributions is better than that of females. 
+
+I will run t-test first on all the contribution values for these 2 groups and next I will sample 100 data points at random, take 1000 samples & run t-test on the sample means.
+
+- T-Test on all data points.
+Clearly T-Statistic value is much more than T-critical value, and we can reject the null and say males have better average.
+
+```{r t_test_gender_all}
+tx <- df %>% filter(!is.na(gender) & gender == 'male'
+                      & contb_receipt_amt >= 0
+                      & contb_receipt_amt <= 1500) %>% 
+             select(contb_receipt_amt)
+
+ty <- df %>% filter(!is.na(gender) & gender == 'female' 
+                      & contb_receipt_amt >= 0 
+                      & contb_receipt_amt <= 1500) %>% 
+             select(contb_receipt_amt)
+
+print(paste("T-Critical value :: ", 
+            round(abs(qt(0.01, nrow(tx) + nrow(ty) - 2)), 3)
+          )
+    )
+
+t.test(tx, ty)
+```
+
+- T-Test on 1000 random sample means.
+Clearly T-Statistic value is much more than T-critical value, and we can reject the null and say males have better average.
+
+```{r t_test_samples_gender}
+mean_sampx <- sapply(replicate(200, sample(tx, 50)), mean)
+names(mean_sampx) <- c()
+mean_sampy <- sapply(replicate(200, sample(ty, 50)), mean)
+names(mean_sampy) <- c()
+
+t_critical <- 
+  round(abs(qt(0.01, length(mean_sampx) + length(mean_sampy) - 2)), 3)
+
+print(paste("T-Critical value :: ", t_critical))
+
+t.test(mean_sampx, mean_sampy)
+```
+
+### Contributions by employment
+Employed people count for most of the donations. 
+
+```{r contribution_by_employment}
+p <- ggplot(data = df, 
+            aes(x = contb_receipt_amt, fill = contbr_employment_status)
+          ) + 
+      geom_histogram(binwidth = 25, alpha = 0.85, show.legend = F) +
+      scale_y_continuous(labels = comma) +
+      scale_x_continuous(breaks = c(-100, 0, 100, 250, 400)) +
+      coord_trans(limx = c(-100, 500)) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Contribution Amounts to Employment Status") +
+      scale_fill_brewer(palette = "Set1") +
+      theme(axis.text.x = element_text(angle = 90)) +
+      facet_grid(~contbr_employment_status) 
+p
+```
+
+Boxplot to show how the donation ranges differ with the employment status. The white dot shows the average donation per category.
+
+```{r contribution_by_employment_boxplot}
+p <- ggplot(data = df, 
+            aes(x = contbr_employment_status, y = contb_receipt_amt)
+          ) + 
+      geom_boxplot(aes(fill = contbr_employment_status), alpha = 0.75,
+                     outlier.colour = "blue",
+                     outlier.size = 0.25,
+                     outlier.alpha = 0.25,
+                     show.legend = F
+                     ) +
+      # White point to show the mean
+      stat_summary(fun.y = mean, geom = "point", size = 2, color = 'white') +
+      scale_y_continuous(limits=c(0,300), 
+                         breaks=seq(0,300, 30), 
+                         expand = c(0, 0)
+                        ) +
+      xlab("Employment Status") +
+      ggtitle("Boxplot of Contribution Amounts to Employment Status") +
+      ylab("Contribution Amount in $") +
+      scale_fill_brewer(palette = "Set1") 
+
+p
+```
+
+### ANOVA Model to compare whether the contribution means significantly varies from one employment group to another
+
+It can be clearly seen from the ANOVA model summary that F-value is 1227 & P-values is almost ZERO. We can reject the null of equal means across the employment categories. There must be one employment category at least that has a different mean from the rest, or maybe all the groups have different mean.
+
+To Test this I am running a pairwise T-test and can see contribution means are same for "RETIRED" & "SELF-EMPLOYED" groups, and dor rest of the groups, every group has significantly different contribution means.
+
+```{r anova_employment_status}
+contributions <- df$contb_receipt_amt            # Contribution Amounts
+employments <- df$contbr_employment_status       # Employment Categories
+
+emp_status_aov <- aov(contributions ~ employments)   # Anova model
+
+cat(sprintf("-------- Anova Model Summary --------\n"))
+summary(emp_status_aov)
+
+cat(sprintf("\n-------- Pairwise T-Test --------"))
+pairwise.t.test(contributions, employments, p.adjust="bonferroni")
+```
+
+### Contribution by Month
+
+```{r contrib_by_month}
+df %>% filter(contb_receipt_dt >= as.Date("2016-01-01")) %>%
+  group_by(month) %>%
+  summarise(count = n(), 
+            total_contribution = sum(contb_receipt_amt), 
+            avg_contribution = mean(contb_receipt_amt)
+            ) %>%
+  arrange(desc(total_contribution)) 
+```
+
+Correlation of contribution amounts to months.
+
+```{r corr_month_contribution_amt}
+rcorr(df$month, df$contb_receipt_amt, type = "spearman")
+```
+
+
+### Contribution by City - Top 10 Cities
+
+```{r top_10_cities}
+df %>% group_by(contbr_city) %>%
+  summarise(n = n(), 
+            total_contribution = sum(contb_receipt_amt), 
+            avg_contribution = mean(contb_receipt_amt)
+            ) %>%
+  arrange(desc(total_contribution)) %>%
+  head(10)
+```
+
+### Contribution by Filenum 
+There are a set of filenames against which contributions are received. I believe this files corresponds to particular accounts maintained by candidates/parties. They are not of much importance. I can see there are some file numbers that are only used for negative amounts or more specifically refunds.
+
+```{r contrb_by_filenum}
+df %>% group_by(file_num) %>%
+  summarise(n = n(), 
+            total_contribution = sum(contb_receipt_amt), 
+            avg_contribution = mean(contb_receipt_amt)
+            ) %>%
+  arrange((total_contribution)) 
+```
+
+### Plot contribution on map by party
+It can be seen clearly that Democrats got contributions much more than Republican and every region contributed for them. In some areas Republicans(red bubble) dominated but in most the areas across CA the democrats(blue bubble) got better contribution.
+
+```{r map_by_party}
+ggmap(map) +
+  geom_point(data = df %>% 
+               filter(contb_receipt_amt >= 0 & contb_receipt_amt <= 2700), 
+             aes(x = longitude, y = latitude, 
+                 color = party), 
+             alpha = 0.5,
+             size = 0.2,
+             na.rm = T
+             ) +
+  scale_color_manual(values = 
+                       c('Democrats' = '#3D60EF', 
+                         'Republicans' = '#F33C4A')
+                    ) +
+  ggtitle("Contributions spread by parties")
+```
+
+When the map is divided by party both look similar but democrats has slight much density in certain areas and overall than the republicans.
+
+```{r map_by_party_facet}
+ggmap(map) +
+  geom_point(data = df %>% 
+               filter(contb_receipt_amt >= 0 & contb_receipt_amt <= 2700), 
+             aes(x = longitude, y = latitude, 
+                 color = contb_receipt_amt), 
+             size = 1,
+             show.legend = T,
+             alpha = 0.01,
+             na.rm = T
+             ) +
+  scale_color_gradient(low = '#36F386', 
+                      high = '#0B4E7B',
+                      name = "Donations"
+                    ) +
+  facet_grid(~party) +
+  ggtitle("Contributions comparison by parties")
+```
+
+### Plot contribution on map by gender
+It can be seen that there are all kinds of bubbles spread across CA. I can see slightly more PinK bubbles that means there are more females.
+
+```{r plot_receipt_amt_gender}
+ggmap(map) +
+  geom_point(data = df %>% 
+               filter(contb_receipt_amt >= 0 & 
+                        contb_receipt_amt <= 2700 & 
+                        !is.na(gender)), 
+             aes(x = longitude, y = latitude, color = gender),
+             size = 0.4,
+             show.legend = T,
+             alpha = 0.5,
+             na.rm = T
+             ) +
+  scale_color_manual(values = 
+                       c("female" = "#F052E6", 
+                         "male" = "#229FCA")
+                    ) +
+  ggtitle("Contributions spread by gender")
+```
+
+### Density Plot of Contributions across Counties by Party
+It can be seen that Democrats has much better density in coastal counties & southern counties. For rest of the counties slight better color density indicates slightly more donations towards Democrats. 
+
+```{r plot_county_density_by_party}
+ca_county_data <- map_data("county", region = "california")
+temp <- 	df %>% filter(!is.na(group)) %>%
+    group_by(group, party) %>% 
+		summarise(donation_counts_by_county = n(), 
+			total_donations_by_county = sum(contb_receipt_amt), 
+			avg_donations_by_county = mean(contb_receipt_amt)
+		)
+
+ca_county_data <- inner_join(ca_county_data, temp, by = "group")
+
+ggplot(ca_county_data, aes(long, lat, group = group)) +
+	geom_polygon(colour = alpha("black", 1 / 2), size = 0.5) +
+	geom_polygon(aes(fill = total_donations_by_county)) +
+	coord_fixed() +
+	theme_minimal() +
+	ggtitle("Total Donations counts across Counties of CA by Party") +
+	    theme(axis.line = element_blank(), axis.text = element_blank(),
+	         axis.ticks = element_blank(), axis.title = element_blank()
+	         ) +
+    	scale_fill_viridis(option="magma", direction = -1, 
+    	                   name = "Total Donations", labels = comma) +
+  facet_grid(~party)
+```
+
+### Density Plot of Contributions across Counties by Gender
+There is not much difference visible from the density plot.
+
+```{r plot_county_density_by_gender}
+ca_county_data <- map_data("county", region = "california")
+temp <- 	df %>% filter(!is.na(group) & !is.na(gender)) %>%
+    group_by(group, gender) %>% 
+		summarise(donation_counts_by_county = n(), 
+			total_donations_by_county = sum(contb_receipt_amt), 
+			avg_donations_by_county = mean(contb_receipt_amt)
+		)
+
+ca_county_data <- inner_join(ca_county_data, temp, by = "group")
+
+ggplot(ca_county_data, aes(long, lat, group = group)) +
+	geom_polygon(colour = alpha("black", 1 / 2), size = 0.5) +
+	geom_polygon(aes(fill = total_donations_by_county)) +
+	coord_fixed() +
+	theme_minimal() +
+	ggtitle("Total Donations counts across Counties of CA by Gender") +
+	    theme(axis.line = element_blank(), axis.text = element_blank(),
+	         axis.ticks = element_blank(), axis.title = element_blank()
+	         ) +
+    	scale_fill_viridis(option="magma", direction = -1, 
+    	                   name = "Total Donations", labels = comma) +
+  facet_grid(~gender)
+```
+
+### Heatmap of donations towards candidates by gender
+It can be clearly seen from the heatmap that Hillary gets most of the donations than other candidates.
+
+```{r donation_to_candidates_by_gender}
+temp <- df %>% filter(!is.na(gender)) %>% 
+  group_by(cand_nm, gender) %>% 
+  summarise(count = n(), 
+            total_contribution = sum(contb_receipt_amt), 
+            avg_contribution = mean(contb_receipt_amt)  
+          )
+
+gp <- ggplot(temp, aes(cand_nm, gender, z = total_contribution)) 
+
+gp + stat_summary_2d(fun = log10) + 
+  theme(axis.text = element_text(angle = 0, colour = '#212F3C'), 
+        axis.line = element_blank(),
+        axis.ticks = element_blank(), 
+        panel.background = element_blank(),
+        axis.title = element_blank()
+      ) + 
+  scale_fill_gradient(low = '#36F386', 
+                      high = '#0B4E7B',
+                      name = "Total Donations\n(in Log Scale)"
+                    ) +
+  ggtitle("Donations towards candidates by Gender") +
+  coord_flip()
+```
+
+### Heatmap of donations towards candidates by employment
+
+```{r donation_to_candidates_by_employment}
+temp <- df %>% group_by(cand_nm, contbr_employment_status) %>% 
+  summarise(count = n(), total_contribution = sum(contb_receipt_amt))
+
+gp <- ggplot(temp, 
+             aes(cand_nm, contbr_employment_status, 
+                 z = total_contribution)
+            ) 
+
+gp + stat_summary_2d(fun = log10) + 
+  theme(axis.text.x = element_text(angle = 10, vjust = 0.3,
+                                   colour = '#212F3C'), 
+        axis.text.y = element_text(colour = '#212F3C'),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(), 
+        panel.background = element_blank(),
+        axis.title = element_blank()
+      ) + 
+  scale_fill_gradient(low = '#36F386', high = '#0B4E7B',
+                      name = "Donations\n(in Log Scale)"
+                    ) +
+  ggtitle("Donations towards candidates by Employments") +
+  coord_flip()
+```
+
+<div id="bivariate_analysis">
+## 6. Bivariate Analysis
+</div>
+### How did the feature(s) of interest vary with other features in the dataset?
+The people of California are inclined towards Democrats & Hillary. Most of the contributions were made for Hillary.
+
+Male & Females are almost having same contribution range. However males have a much higher outliers.
+There are slight differences as compared by people's employment status. Business people contributed higher and unemployment people could contribute least. As most of the people are employed the contribution for employed histogram is similar to the histogram of the whole dataset.
+
+Most of the contributions are from San Francisco, San Jose, San Diego, Sacramento & Los Angles areas.
+There are not much difference by gender, party. The contributions varies by month to month.
+
+### Did you observe any interesting relationships between the other features (not the main feature(s) of interest)?
+There are not much I can observe from other features. I can only see there are a number of file numbers against which contributions are made. There are file numbers for refunds as I can see some file numbers accounted for negative amounts.
+Apart from that its interesting to see the donations are distributed across CA, and most of the donations are recived from cities like San Diego, San Francisco, LA etc.
+
+### What was the strongest relationship you found?
+There was not much strong relationship I could see. Only employment status has some influence on the contributions as compared to other features.
+
+<div id="multivariate_plots">
+## 7. Multivariate Plots Section
+</div>
+
+### Contribution by gender & party
+Both the genders have similar set of distributions but females made much more donations in the range of 0 - 30 dollars. Females contributed more for Democrats as compared to males, and males contributed slightly more towards republicans.
+
+```{r contrib_by_gender_party}
+p <- ggplot(data = subset(df, !is.na(gender)), 
+            aes(x = contb_receipt_amt)
+           ) + 
+      geom_histogram(binwidth = 30, aes(fill = party), 
+                     position = "dodge") +
+      scale_x_continuous(breaks = seq(-100, 400, 100)) +
+      coord_trans(limx = c(-100, 500)) +
+      scale_fill_manual(values = 
+                          c('Democrats' = '#3D60EF', 
+                            'Republicans' = '#F33C4A'),
+                        labels = comma
+                        ) +
+      xlab("Contribution Amount in $") +
+      ggtitle("Histogram of Contribution Amounts by Gender & Party") +
+      facet_grid(~gender)
+
+p
+```
+
+### Contribution by gender & party boxplot
+The below boxplot shows males contributed slightly more towards Republicans as compared to females. Orange points shows the mean.
+
+```{r contrib_by_gender_party_box}
+p <- ggplot(data = subset(df, !is.na(gender)), 
+            aes(x = party, y = contb_receipt_amt)
+          ) + 
+      geom_boxplot(aes(fill = party),
+                     outlier.colour = "blue",
+                     outlier.size = 0.25,
+                     outlier.alpha = 0.25,
+                     alpha=0.75, 
+                     show.legend = F
+                     ) +
+      stat_summary(fun.y = mean, geom = "point", 
+                   size = 1.2, color = 'orange') +
+      scale_y_continuous(limits=c(-100,200), 
+                         breaks=seq(-100,200, 100), 
+                         expand = c(0, 0)
+                         ) +
+      scale_fill_manual(values = 
+                          c('Democrats' = '#3D60EF', 
+                            'Republicans' = '#F33C4A')
+                        ) +
+      ylab("Contribution Amount in $") +
+      xlab("") +
+      ggtitle("Boxplot of Contribution Amounts by Gender & Party") +
+      theme(legend.position = "none") +
+      facet_grid(~gender)
+p
+```
+
+This below plot will show the total contributions per party by gender & employment status.
+
+```{r party_gender_employment_status}
+p <-  df %>% filter(!is.na(gender)) %>% 
+      group_by(party, gender, contbr_employment_status) %>% 
+      summarise(total_contributions = sum(contb_receipt_amt)) %>%
+      ggplot( 
+            aes(x = gender, y = total_contributions, 
+                fill=contbr_employment_status)
+           ) + 
+      geom_bar(position = "dodge", stat = "identity", show.legend = T) +
+      scale_y_continuous(labels = comma) +
+      scale_fill_brewer(palette = "Set1", name = "Employment Status") +
+      ylab("Total Contribution Amount in $") +
+      ggtitle("Total Contribution Amounts by Gender-Party-Employment") +
+      facet_grid(~party)
+p
+```
+
+### Contribution by employment status & party boxplot
+Republicans got slightly higher valued donations across all employment category level. No wonder why the average donation received is more for them.
+
+```{r contrib_by_emps_party_box}
+p <- ggplot(data = subset(df), 
+            aes(x = contbr_employment_status, y = contb_receipt_amt)
+          ) + 
+      geom_boxplot(aes(fill = party),
+                     outlier.colour = "blue",
+                     outlier.size = 0.25,
+                     outlier.alpha = 0.25,
+                     alpha=0.75, 
+                     show.legend = T
+                     ) +
+      stat_summary(fun.y = mean, geom = "point", 
+                   size = 1.2, color = 'orange') +
+      scale_y_continuous(limits=c(-100,200), 
+                         breaks=seq(-100,200, 100), 
+                         expand = c(0, 0)) +
+      scale_fill_manual(values = 
+                          c('Democrats' = '#3D60EF', 
+                            'Republicans' = '#F33C4A')
+                        ) +
+      theme(legend.background = element_rect(fill="lightblue", 
+                                  size=0.5, linetype="solid"),
+            axis.text.x = element_text(angle = 10)
+            ) + 
+      ylab("Contribution Amount in $") +
+      xlab("") +
+      ggtitle("Boxplot of Contributions by Employment status & Party")
+p
+```
+
+### Contribution analysis by gender & employment status
+There are a lot of donations and more towards democrats. It is seen that overall republicans average is more than democrats. It is clearly seen that republicans has recieve more in average and more male avg. as compared to females.
+
+```{r donations_by_gender}
+df %>% filter(contb_receipt_amt > 0 & 
+                contb_receipt_amt <= 2700 & 
+                !is.na(gender)) %>%
+  group_by(party, gender) %>% 
+  summarise(count = n(), total_contributions = sum(contb_receipt_amt), 
+            avg_contribution = mean(contb_receipt_amt),
+            median_contribution = median(contb_receipt_amt)
+          )
+```
+
+Males donated slightly more than females on average across all income categories. This appiles both for Republicans & Democrats.
+
+```{r donations_by_gender_employment}
+DT::datatable(
+df %>% filter(contb_receipt_amt > 0 & 
+                contb_receipt_amt <= 2700 & 
+                !is.na(gender)) %>%
+  group_by(party, gender, contbr_employment_status) %>% 
+  summarise(total_contributions = sum(contb_receipt_amt), 
+            avg_contribution = mean(contb_receipt_amt),
+            median_contribution = median(contb_receipt_amt)
+          ) %>% 
+  arrange(contbr_employment_status)
+)
+```
+
+### Density Plot of Contributions across Counties by Gender & Party
+Male donations have better density for Republicans. For Democrats there is not much visible difference in density of male & female donations.
+
+```{r plot_county_density_by_gender_party}
+ca_county_data <- map_data("county", region = "california")
+temp <- 	df %>% filter(!is.na(group) & !is.na(gender)) %>%
+    group_by(group, gender, party) %>% 
+		summarise(donation_counts_by_county = n(), 
+			total_donations_by_county = sum(contb_receipt_amt), 
+			avg_donations_by_county = mean(contb_receipt_amt)
+		)
+
+ca_county_data <- inner_join(ca_county_data, temp, by = "group")
+
+ggplot(ca_county_data, aes(long, lat, group = group)) +
+	geom_polygon(colour = alpha("black", 1 / 2), size = 0.5) +
+	geom_polygon(aes(fill = total_donations_by_county)) +
+	coord_fixed() +
+	theme_minimal() +
+	ggtitle("Total Donations counts across Counties of CA by Gender-Party") +
+	    theme(axis.line = element_blank(), axis.text = element_blank(),
+	         axis.ticks = element_blank(), axis.title = element_blank()
+	         ) +
+    	scale_fill_viridis(option="magma", direction = -1, 
+    	                   name = "Total Donations", labels = comma) +
+  facet_grid(gender ~ party)
+```
+
+### Total Contributions by party & timeline
+Democrats received much more donations that can be clearly seen from the below summary tables.
+
+Republicans received donations throughout the months without having much different from one month to the next.
+
+-- Democrats
+
+```{r top_by_contrb_gender_month_democrats}
+df %>% group_by(party, month) %>% 
+    filter(party == "Democrats") %>%
+    summarise(total_contributions = sum(contb_receipt_amt)) %>%
+    arrange(desc(total_contributions)) %>% head()
+```
+
+-- Republicans 
+
+```{r top_by_contrb_gender_month_republicans}
+df %>% group_by(party, month) %>% 
+    filter(party == "Republicans") %>%
+    summarise(total_contributions = sum(contb_receipt_amt)) %>%
+    arrange(desc(total_contributions)) %>% head()
+```
+
+The below plot shows the contribution totals by timelines and grouped by party & gender.
+
+```{r party_gender_time_line}
+dfm <- df %>% filter(!is.na(gender) & 
+                       contb_receipt_dt >= as.Date("2016-01-01"))
+dfm$month <- factor(dfm$month, levels = position)
+
+# largest n captures most color
+my_colors <- brewer.pal(n = 9, "YlGnBu")  
+# extend palette
+color_range <- colorRampPalette(my_colors)
+month_pal <- color_range(length(unique(dfm$month)))
+
+p <-  dfm %>%
+      group_by(party, gender, month) %>% 
+      summarise(total_contributions = sum(contb_receipt_amt)) %>%
+      ggplot( 
+            aes(x = gender, y = total_contributions, fill=month)
+           ) + 
+      geom_bar(position = "dodge", stat = "identity", show.legend = T) +
+      scale_y_continuous(labels = comma) +
+      scale_fill_manual(values = month_pal) + 
+      ylab("Total Contribution Amount in $") +
+      ggtitle("Total Contribution Amounts by party-gender-timeline") +
+      facet_grid(~party)
+p
+```
+
+
+
+
+### Statistics summary of the donations by timeline
+This plot will show the average contributions made per month towards each party for both males & females.
+
+-- Average
+Average donations were almost same for both the parties till August. Afterwards the average significantly increased for Republicans.
+
+```{r moving_avg_mean}
+moving_avg_by_month_gender <- 
+  dfm %>% group_by(party, gender, month) %>% 
+  summarise(avg_contribution = mean(contb_receipt_amt),
+            median_contribution = median(contb_receipt_amt),  
+            total_contribution = sum(contb_receipt_amt)
+          )
+
+p <- moving_avg_by_month_gender %>% 
+      ggplot(aes(x = month, y = avg_contribution, 
+                 fill = gender, group = gender, shape = gender)) +
+        geom_bar(stat = "identity", position = "dodge") +
+        scale_fill_manual(values = c("female" = "#F052E6", 
+                                      "male" = "#229FCA")
+                           ) +
+        ggtitle("Moving average of contributions per month by gender-party") +
+        xlab("") +
+        ylab("Avg Contribution in $") +
+        theme(axis.text.x = element_text(angle = 90)) +
+        facet_grid(~party)
+
+p
+```
+
+-- Median 
+Republicans have much higher medians as compared to Democrats. This indicates that economically stronger sections supported more to Republicans.
+
+```{r moving_avg_median}
+p <- moving_avg_by_month_gender %>% 
+      ggplot(aes(x = month, y = median_contribution, 
+                 fill = gender, group = gender, shape = gender)) +
+        geom_bar(stat = "identity", position = "dodge") +
+        scale_fill_manual(values = c("female" = "#F052E6", 
+                                      "male" = "#229FCA")
+                           ) +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle("Median contributions per month by gender-party") +
+        xlab("") +
+        ylab("Median Contribution in $") +
+        theme(axis.text.x = element_text(angle = 90)) +
+        facet_grid(~party)
+
+p
+```
+
+-- Total
+It can be clearly seen Democrats received much more donations as compared to Republicans and females donated more to Democrats.
+
+```{r total_cont_by_month_gender_party}
+p <- moving_avg_by_month_gender %>% 
+      ggplot(aes(x = month, y = total_contribution, 
+                 fill = gender, group = gender, shape = gender)) +
+        geom_bar(stat = "identity", position = "dodge") +
+        scale_y_continuous(labels = comma) +
+        scale_fill_manual(values = c("female" = "#F052E6", 
+                                      "male" = "#229FCA")
+                           ) +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle("Total contributions per month by gender-party") +
+        xlab("") +
+        ylab("Total Contribution in $") +
+        theme(axis.text.x = element_text(angle = 90)) +
+        facet_grid(~party)
+
+p
+```
+
+### Linear model for predicting contribution amount based on the main features
+
+```{r correlation}
+dfh <- df %>% filter(contb_receipt_dt >= as.Date('2016-01-01') 
+                     & !is.na(gender)) %>% 
+          select(contbr_employment_status, gender, 
+                 month, party, contb_receipt_amt) 
+
+# Linear Model
+m1 <- lm(I(contb_receipt_amt) ~ I(party), data = dfh)
+m2 <- update(m1, ~ . + gender)
+m3 <- update(m2, ~ . + contbr_employment_status)
+m4 <- update(m3, ~ . + month)
+summary(m4)
+```
+
+### Random Forest Model to predict depending on features donations will be made to which party
+
+```{r random_forest_model}
+# Set a random seed
+set.seed(12345)
+
+dfh <- df %>% filter(!is.na(gender)) %>% head(200000)
+# Build the random forest model 
+# (note: not all possible variables are used)
+model <- randomForest(party ~ 
+                        contb_receipt_amt + month + 
+                        gender + contbr_employment_status,
+                        data = dfh, mtry = 3
+                    )
+model
+```
+
+### Random Forest Model Error
+
+```{r model_error}
+# Show model error
+plot(model, ylim=c(0,0.5))
+legend('topright', colnames(model$err.rate), 
+       col=1:3, 
+       fill=1:3)
+```
+
+<div id="multivariate_analysis">
+## 8. Multivariate Analysis
+</div>
+
+## Talk about some of the relationships you observed in this part of the investigation. Were there features that strengthened each other in terms of looking at your feature(s) of interest?
+In general there was not much relationship within variables or contributions. There was general trend of people contributing more towards Democrats, and this was strenthened by the timing of elections. People started donating much as election approached. Whereas Republicans received almost same amount of contributions month by month.
+
+## Were there any interesting or surprising interactions between features?
+Interest features what I find are below.
+
+- Republicans received much higher contributions on average. Again the same is noticed over all income category people or across different employment category. 
+
+- Males contributed to Republicans with more average than females. 
+
+- Republicans contribution did not increase with time. It remained constant. This is surprising as in general people tend to contribute as the election comes closer.
+
+## OPTIONAL: Did you create any models with your dataset? Discuss the strengths and limitations of your model.
+
+I tried creating a linear model to fit to estimating the contribution amount depending on features like party, gender, timing, employment status; but it did not look good.
+
+Next, I tried to create a random forest model to predict the party based on the contribution amount, gender and other features. It did a pretty decent job, and for predicting Democrats. It does not do good while predicting Republicans. But overall around 10% error rate is not bad. Creating a such prediction model is out of scope of the project.
+
+***
+
+<div id="final_plots">
+## 9. Final Plots
+</div>
+
+### Plot One
+This plot will show the total contributions per party by gender & employment status.
+
+```{r final_plot_1}
+p <-  df %>% filter(!is.na(gender)) %>% 
+      group_by(party, gender, contbr_employment_status) %>% 
+      summarise(total_contributions = sum(contb_receipt_amt)) %>%
+      ggplot( 
+            aes(x = gender, y = total_contributions, 
+                fill=contbr_employment_status)
+           ) + 
+      geom_bar(position = "dodge", stat = "identity", show.legend = T) +
+      scale_y_continuous(labels = comma) +
+      scale_fill_brewer(palette = "Set1", name = "Employment Status") +
+      ylab("Total Contribution Amount in $") +
+      ggtitle("Total Contribution Amounts by Gender-Party-Employment") +
+      facet_grid(~party)
+p
+```
+
+### Description One
+
+It can be clearly seen that males contributed more even though the number of female contribution is more. Employed people are donated almost more than 90% of the total. For democrats males & females are equally contributed; but for republicans males contributed slightly more than females.
+
+***
+
+### Plot Two
+This plot will show the total contributions per party by gender & timing.
+
+```{r final_plot_2}
+p <-  dfm %>%
+      group_by(party, gender, month) %>% 
+      summarise(total_contributions = sum(contb_receipt_amt)) %>%
+      ggplot( 
+            aes(x = gender, y = total_contributions, fill=month)
+           ) + 
+      geom_bar(position = "dodge", stat = "identity", show.legend = T) +
+      scale_y_continuous(labels = comma) +
+      scale_fill_manual(values = month_pal) + 
+      ylab("Total Contribution Amount in $") +
+      ggtitle("Total Contribution Amounts by party-gender-timeline") +
+      facet_grid(~party)
+p
+```
+
+### Description Two
+The 2016 US Presidential elections was help on 8th November. In general people tend to become more involved as the elections come closed. The above bars shows total contributions received per month of entire 2016.
+It can be clearly seen that for Democrats there is a constant increase in total contribution from previous month. This trend is seen for both males & females. For Republicans there is no such trend, the total amount of contributions are pretty uneven and even if there are some increase but it's not comparable with the increase for Democrats.
+
+*** 
+
+### Plot Three
+This plot will show moving average of the average contributions made per month towards each party for both males & females.
+
+```{r final_plot_3}
+moving_avg_by_month_gender <- 
+  dfm %>% group_by(party, gender, month) %>% 
+  summarise(avg_contribution = mean(contb_receipt_amt))
+
+p <- moving_avg_by_month_gender %>% 
+      ggplot(aes(x = month, y = avg_contribution, 
+                 fill = gender, group = gender, shape = gender)) +
+        geom_bar(stat = "identity", position = "dodge") +
+        scale_fill_manual(values = c("female" = "#F052E6", 
+                                      "male" = "#229FCA")
+                           ) +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle("Average contributions per month by gender-party") +
+        xlab("") +
+        ylab("Contributions in $") +
+        theme(axis.text.x = element_text(angle = 90)) +
+        facet_grid(~party)
+
+p
+```
+
+### Description Three
+It can be clearly seen that males have slight more average for donations made to both the parties. Another interesting observation is for Republicans there is very much increase in average donations. Whereas for Democrats there is decrease after Aug. This is exactly opposite of what we observer earlier.
+
+Earlier we dealt in total contributions only and did not take average contributions into consideration. I think there are a lot of people donated for Democrats with slightly smaller average making the total donations collectively much more than that of Republicans.
+
+We don't have enough data to understand what section of people donated for which party. But it can be assumed less number of people donated to Republicans with more average donations. They must have come from the stronger economic section of the society. Unfortunately we don't have any data on contributor's socio-economic status to analyse any further.
+
+***
+
+<div id="reflection">
+## 10. Reflection
+</div>
+
+> This campaign contributions dataset was an interesting one and I used the provided features as-is and derived few features to add more features to the analysis. The most significant features that could be used to predict contribution amount are party, gender, employment status & contribution timiline. The features are playing some role in predicting the contribution amount. 
+
+> I tried to use a linear model to predict how the features are useful to predict the contribution amount. It did not do much good job.
+
+> Again I tried to create a random forest model to predict the contribution party depending on the contribution amount, gender, employment status & timeline provided, and it did not so bad while making the predictions.
+
+> It seemed the total contribution counts and total contribution amount were correlated with cities and much densed in cities like San Francisco, San Diego, LA etc. For zipcode that didn't seem to be citites or in rural areas does not have much density or bigger bubbles representing huge amount of donation or a lot of donation counts.
+
+> Some interest facts were seen where total contribution counts and amounts much higher towards Democrats but had lower average. This can show that Republicans were mostly supported by people with stronger socio-econimic status.
+
+> There were some problems encountered for having names in some dirty format. It was not possible to programatically extract first names for everyone and also the gender package used is unable to match some names. Due to this some names were missed and some genders were not predicted. 
+Another problem encountered while categorizing the employment status using the contributor's occupation. There were also some missing data encounter that could not be understood due to not having much meaningful information.
+
+> I would like to add some ideas for the dataset as inclusion of few features will make the dataset more understandable and enrich the analysis. The features can be included like Age, Gender, Income range, Dependents. There are some information a section of people might not share like Income range or Age. But inclusion of these will enrich the dataset. Again we can include the location information like City, Urban, Semi-urban & Rural.
+
+> There are a lot of further analysis that can be done if these features are available.
+
+> As analysed from the dataset it's very much obvious that most of the people contributed for Democrats & Hillary Clinton. Maybe these people will vote for Democrats and not surprisingly it turns out to be Democrats winning in CA with a very good margin. So a general trend was seen from the dataset.
+
+***
