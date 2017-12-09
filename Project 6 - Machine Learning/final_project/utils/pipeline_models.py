@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
-Created on Mon Aug 28 23:57:43 2017
+Created on Mon Dec 9 23:57:43 2017
 
 @author: sourabh
 """
@@ -58,32 +58,30 @@ def pipeline_LSVC_model(features_train, labels_train, features_test, labels_test
     return grid_search    
     
     
-def pipeline_KNN_model(features_train, labels_train, features_test, labels_test):
+#def pipeline_KNN_model(features_train, labels_train, features_test, labels_test, cv):
+def pipeline_KNN_model(features, labels, cv):
     from time import time
     from sklearn.neighbors import KNeighborsClassifier
     
     start = time()
-    
+
     estimators = [('feature_transformer', MinMaxScaler()),
-                  ('selection', SelectKBest()),
                   ('reduce_dim', PCA()), 
                   ('clf', KNeighborsClassifier())
                  ]
     
-    param_grid = {'selection__k': [5, 7, 9, 10, 'all'],
-                  'clf__n_neighbors': [1, 2, 3, 5, 8, 10],
+    param_grid = {'clf__n_neighbors': [1, 2, 3, 4, 5, 8, 10],
                   'clf__algorithm': ['ball_tree', 'kd_tree'],
-                  'clf__leaf_size': [2, 5, 10, 15, 30],
-                  'reduce_dim__n_components': [1, 2, 3, 4, 5],
-                  'reduce_dim__whiten': [True, False]
+                  'clf__leaf_size': [1, 2, 3, 4, 5, 10],
+                  'reduce_dim__n_components': [3, 4, 5, 6, 7, 8]
                   }
     
     pipeline = Pipeline(estimators)
     grid_search = GridSearchCV(pipeline, param_grid=param_grid,
-                               #scoring=make_scorer(recall_score), 
                                scoring = 'recall',
-                               n_jobs=-1, cv=15)
-    grid_search.fit(features_train, labels_train)
+                               n_jobs=-1, cv=cv
+                               )
+    grid_search.fit(features, labels)
     
     print '\nTime taken to Grid Search KNN model : {} sec'.format(round(time() - start, 2))
     
@@ -137,4 +135,39 @@ def pipeline_RF_model(features_train, labels_train, features_test, labels_test):
     print '\nTime taken to Random Search RF model : {} sec'.format(round(time() - start, 2))
     
     return random_search    
+    
+    
+def pipeline_LRegr_model(features, labels, cv):
+    from time import time
+    from sklearn.linear_model import LogisticRegression
+    
+    start = time()
+    
+    estimators = [('feature_transformer', MinMaxScaler()),
+                  ('selection', SelectKBest()),
+                  ('reduce_dim', PCA()),
+                  ('clf', LogisticRegression())
+                               ]
+    
+    param_grid = {'selection__k': [5, 6, 7, 8, 'all'],
+                  'clf__C': [1e-2, 1e-1, 1, 2, 5, 10],
+                  'clf__class_weight': [{True: 12, False: 1},
+                                               {True: 10, False: 1},
+                                               {True: 8, False: 1}],
+                  'clf__tol': [1e-1, 1e-4, 1e-16,
+                                      1e-64, 1e-256],
+                  'reduce_dim__n_components': [2, 3, 4]#,
+                  #'reduce_dim__whiten': [True, False]
+                  }
+    
+    pipeline = Pipeline(estimators)
+    grid_search = GridSearchCV(pipeline, param_grid=param_grid,
+                               scoring = 'recall',
+                               n_jobs=-1, cv=cv
+                               )
+    grid_search.fit(features, labels)
+    print '\nTime taken to Grid Search Logistics Regression model : {} sec'.format(round(time() - start, 2))
+    
+    return grid_search        
+
     
