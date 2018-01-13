@@ -1,0 +1,76 @@
+/*
+*{
+    -webkit-box-sizing: border-box;
+    -moz-box-sizing: border-box;
+    -ms-box-sizing: border-box;
+    box-sizing: border-box;
+}
+*/
+
+.banner {
+    text-align: center;
+    font-family: "Helvetica Neue", Helvetica;
+    font-size: 12px;
+    padding: 0.5px;
+    color: black;
+    background-color: #0abda0;/*#d02560;*/
+}
+
+.banner:hover { color: white; text-decoration: blink; }
+
+.text{ 
+    font-family: 'Helvetica Neue', sans-serif; 
+    font-size: 14px; 
+    line-height: 24px; 
+    margin: 0 0 24px; 
+    text-align: justify; 
+    text-justify: inter-word; 
+}
+
+.chart {
+    font-family: "Helvetica Neue", Helvetica;
+    font-size: medium;
+    margin: 40px;
+}
+
+/*.tick line{
+  visibility:hidden;
+}*/
+
+.closer {
+    font-family: "Helvetica Neue", Helvetica;
+    font-size: 8px;
+    padding: 1px;
+    color: white;
+    background-color:#fb998e;
+    text-align: right;
+}
+
+
+/* Button Group Styling */
+.btn-group button {
+    background-color: #4CAF50; /* Green background */
+    border: 2px solid green; /* Green border */
+    color: white; /* White text */
+    padding: 10px 24px; /* Some padding */
+    cursor: pointer; /* Pointer/hand icon */
+    float: left; /* Float the buttons side by side */
+}
+
+/* Clear floats (clearfix hack) */
+.btn-group:after {
+    content: "";
+    clear: both;
+    display: table;
+}
+
+.btn-group button:not(:last-child) {
+    border-right: none; /* Prevent double borders */
+}
+
+/* Add a background color on hover */
+.btn-group button:hover {
+    background-color: #3e8e41;
+}
+
+/* End Button Group Styling */
