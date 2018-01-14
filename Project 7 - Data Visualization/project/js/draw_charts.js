@@ -34,68 +34,132 @@ function getSeriesOrderRule(categoryToGroup) {
 
 
 
-function drawBasicSummaryChart(data, categoryToGroup) {
-	var scaler = 0.5;
+function draw(data) {
+	"use strict";
+
+   	var scaler = 0.5;
 	var lWidth = width * scaler,
 		lHeight = height * scaler;
 
-	var data = nullFreeData(data, categoryToGroup);
+	var categories = ["Sex", "Class", "Embarked", "Age_Group"];
 
-    /* Group by Gender */
-    var svgSingleVarCategory = dimple.newSvg("#chartContainer", lWidth + margin, lHeight + margin);
-    var singleVarGroupByChart = new dimple.chart(svgSingleVarCategory, data);
-    var x = singleVarGroupByChart.addCategoryAxis("x", [categoryToGroup]);
-    var y = singleVarGroupByChart.addMeasureAxis("y","PassengerID");
-
-    singleVarGroupByChart.setBounds(margin*1.5, margin*1.2, lWidth - margin*2, lHeight - margin*1.2);
-
-    /* Axis titles */
-    x.title = categoryToGroup;
-    var seriesOrderRule = getSeriesOrderRule(categoryToGroup);
-    x.addOrderRule(seriesOrderRule);
-    x.ticks = seriesOrderRule.length-1;
-
-    y.title = "Number of Passengers";
-    y.ticks = 5;
-
-    var chartSeries = singleVarGroupByChart.addSeries(null, dimple.plot.bar);
-    chartSeries.aggregate = dimple.aggregateMethod.count;    
-    chartSeries.barGap = 0.2;
-
-    /*singleVarGroupByChart.defaultColors = [
-	    new dimple.color("#197DA5") 
-	];*/
-
-    svgSingleVarCategory.append("text")
-			    		.attr("x", singleVarGroupByChart._xPixels() + singleVarGroupByChart._widthPixels() / 2)
-			    		.attr("y", singleVarGroupByChart._yPixels() - 20)
-			    		.style("text-anchor", "middle")
-			    		.style("font-family", "sans-serif")
-			    		.style("font-weight", "bold")
-			    		.text("Passenger counts by " + categoryToGroup);
+	/* Function to Draw Bar Chart */
+	function draw_bar_chart(categoryToGroup="Sex") {
+		// Remove nulls from categories
+		data = nullFreeData(data, categoryToGroup);
 
 
-    // Removing X axis tick lines
-    svgSingleVarCategory.selectAll('.dimple-gridline')
-    		  			.style("visibility", "hidden");
+		var svgSingleVarCategory = dimple.newSvg("#chartContainer", lWidth + margin, lHeight + margin);
+	    var singleVarGroupByChart = new dimple.chart(svgSingleVarCategory, data);
+	    var x = singleVarGroupByChart.addCategoryAxis("x", [categoryToGroup]);
+	    var y = singleVarGroupByChart.addMeasureAxis("y","PassengerID");
 
-    // Customize ToolTip
-    // debugger;
-	chartSeries.getTooltipText = function (e) {
-		return [
-	    	categoryToGroup + ": " + e.x,
-	    	"Count: " + e.y,
-	    	"Percent: " + (e.y * 100 / data.length).toFixed(2) + " %"
-	    ];
+	    singleVarGroupByChart.setBounds(margin*1.5, margin*1.2, lWidth - margin*2, lHeight - margin*1.2);
+
+	    /* Axis titles */
+	    x.title = categoryToGroup;
+	    var seriesOrderRule = getSeriesOrderRule(categoryToGroup);
+	    x.addOrderRule(seriesOrderRule);
+	    x.ticks = seriesOrderRule.length-1;
+
+	    y.title = "Number of Passengers";
+	    y.ticks = 5;
+
+	    var chartSeries = singleVarGroupByChart.addSeries(null, dimple.plot.bar);
+	    chartSeries.aggregate = dimple.aggregateMethod.count;    
+	    chartSeries.barGap = 0.2;
+
+	    svgSingleVarCategory.append("text")
+				    		.attr("x", singleVarGroupByChart._xPixels() + singleVarGroupByChart._widthPixels() / 2)
+				    		.attr("y", singleVarGroupByChart._yPixels() - 20)
+				    		.style("text-anchor", "middle")
+				    		.style("font-family", "sans-serif")
+				    		.style("font-weight", "bold")
+				    		.text("Passenger counts by " + categoryToGroup);
+
+
+	    // Removing X axis tick lines
+	    svgSingleVarCategory.selectAll('.dimple-gridline')
+	    		  			.style("visibility", "hidden");
+
+	    // Customize ToolTip
+		chartSeries.getTooltipText = function (e) {
+			return [
+		    	categoryToGroup + ": " + e.x,
+		    	"Count: " + e.y,
+		    	"Percent: " + (e.y * 100 / data.length).toFixed(2) + " %"
+		    ];
+		};
+
+	    singleVarGroupByChart.draw();
 	};
+    
+    /* Function to Update the Bar chart according to Category */
+    function update(categoryToGroup) {
+    	// Remove the previous SVG
+    	d3.select("svg").remove();
 
-    singleVarGroupByChart.draw();
+    	// Append new SVG grouped by the selected category
+    	draw_bar_chart(categoryToGroup);
 
-    // Removing Null Values
-    chartSeries.shapes.style("opacity", function (e) {
-    	//debugger;
-	    return (e.x === 0 || e.x === "" ? 0 : 0.8);
-	});
+    };
 
-};
+
+    var categoryIndex = 0;
+    var categoryInterval = setInterval(function() { 
+              update(categories[categoryIndex]);
+
+              categoryIndex++;
+
+              if (categoryIndex >= categories.length) {
+                clearInterval(categoryInterval);
+				
+                // Add Category buttons
+                var buttons = d3.select('div #intro')
+                          .append('div')
+                          .attr('id', 'buttonSet')
+                          .attr('class', 'btn-group')
+                          .selectAll('button')
+                          .data(categories)
+                          .enter()
+                          .append('button')
+                          .attr("value", function(d) { return d; })
+                          .text(function(d) { return d; });
+
+                // Add button On-Click event handler
+                buttons.on("click", function(d) {
+
+                	// Keep the button Group same
+	                d3.select(".btn-group")
+	                  .selectAll("button")
+	                  .transition()
+	                  .duration(500)
+	                  .style("background", "#4CAF50")
+	                  .style("color", "white")
+	                  .style("font-weight", "normal")
+	                  .style("font-size", "10");
+                  
+                  	// Mark the selected button differently
+                  	d3.select(this)
+                      .transition()
+                      .duration(500)
+                      .style("background", "#3e8e41")
+                      .style("color", "black")
+                      .style("font-weight", "bold")
+                      .style("font-size", "9");
+
+                    // Update the SVG Bar Chart
+                  	update(d);
+                }); 
+              }
+          }, 1000);
+
+
+    draw_bar_chart();
+
+}
+
+
+
+
 

@@ -9,30 +9,7 @@
 </head>
 <body>
 	<script src="/js/draw_charts.js"></script>
-	<script type="text/javascript">
-		"use strict";
 
-		function draw(data, categoryToGroup="Sex") {
-			drawBasicSummaryChart(data, categoryToGroup);
-		}
-
-    function reDraw(data, categoryToGroup) {
-      // Remove previous Chart
-      d3.select("svg").remove();
-
-      draw(data, categoryToGroup);
-    }
-
-    function clickSingleCategory(buttonValueObject) {
-      var categoryToGroup = buttonValueObject.value;
-
-      d3.csv("./data/data_titanic.csv", function(data) {
-        reDraw(data, categoryToGroup);
-      });
-    }
-
-	</script>
-	
 	<header class="banner">
         <div>
           <h1>Project 7: Visualizing data with D3</h1>
@@ -49,18 +26,12 @@
       	  	</p>
         </div>
 
-        <div id="buttonSet" class="btn-group">
-          <button type="button" value="Sex" onclick="clickSingleCategory(this);" autofocus>Sex</button>
-          <button type="button" value="Class" onclick="clickSingleCategory(this);">Class</button>
-          <button type="button" value="Embarked" onclick="clickSingleCategory(this);">Embarked</button>
-          <button type="button" value="Age_Group" onclick="clickSingleCategory(this);">Age_Group</button>
-        </div>
-
-        <div id="chartContainer" class = "svgContainer">
+        <div id="chartContainer">
           <script type="text/javascript">
           	d3.csv("./data/data_titanic.csv", draw);
           </script>
         </div>
+
         <div>
           	<p class="text"> 
           		As the graphs show there were more male passengers than female passengers, more third class passengers than either first or second class, and more passengers embarking in Southampton (the first stop). Ages are normally distributed with the higest number of passengers being between 21 - 30, though there was a large portion of passengers whose ages were unknown.  Most passengers were travelling alone, and there were fewer and fewer passengers who had multiple family members.  Impossibly, 7 passengers  have ten family members aboard.
