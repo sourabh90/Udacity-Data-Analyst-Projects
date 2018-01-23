@@ -5,39 +5,39 @@
   	<meta charset="utf-8">
   	<script src="http://d3js.org/d3.v4.min.js"></script>
   	<script src="http://dimplejs.org/dist/dimple.v2.3.0.min.js"></script>
-  	<link rel="stylesheet" type="text/css" href="/css/styles.css">
+    <link rel="stylesheet" type="text/css" href="/css/style.css">
 </head>
 <body>
 	<script src="/js/draw_charts.js"></script>
 
 	<header class="banner">
-        <div>
-          <h1>Project 7: Visualizing data with D3</h1>
-        </div> 
-    </header>
-
     <div>
-        <div id = "intro">
-          <h2>Introduction</h2>
-          	<p class = "text"> 
+      <h1>Project 7: Visualizing data with D3</h1>
+    </div> 
+  </header>
+
+  <div>
+    <div id = "intro">
+      <h2>Introduction</h2>
+      <p class = "text"> 
           		RMS Titanic was a British passenger liner that sank in the North Atlantic Ocean in the early morning hours of 15 April 1912, after it collided with an iceberg during its maiden voyage from Southampton to New York City. There were an estimated 2,224 passengers and crew aboard the ship, and more than 1,500 died, making it one of the deadliest commercial peacetime maritime disasters in modern history. The disaster was met with worldwide shock and outrage at the huge loss of life and the regulatory and operational failures that had led to it.
           		<br><br>
           		The dataset was originally provided at Kaggle website. It contains information about 891 passengers from the total 2224 passengers. This presentation tries to analyze the dataset in a number of ways and conclude on what are the factors that helped people to suvive.
-      	  	</p>
-        </div>
-
-        <div id="chartContainer">
-          <script type="text/javascript">
-          	d3.csv("./data/data_titanic.csv", draw);
-          </script>
-        </div>
-
-        <div>
-          	<p class="text"> 
-          		As the graphs show there were more male passengers than female passengers, more third class passengers than either first or second class, and more passengers embarking in Southampton (the first stop). Ages are normally distributed with the higest number of passengers being between 21 - 30, though there was a large portion of passengers whose ages were unknown.  Most passengers were travelling alone, and there were fewer and fewer passengers who had multiple family members.  Impossibly, 7 passengers  have ten family members aboard.
-          	</p>
-        </div>
+      </p>
     </div>
+
+    <div id="chartContainer">
+      <script type="text/javascript">
+          	d3.csv("./data/data_titanic.csv", draw);
+      </script>
+    </div>
+
+    <div>
+    	<p class="text"> 
+    		As the graphs show there were more male passengers than female passengers, more third class passengers than either first or second class, and more passengers embarking in Southampton (the first stop). Ages are normally distributed with the higest number of passengers being between 21 - 30, though there was a large portion of passengers whose ages were unknown.  Most passengers were travelling alone, and there were fewer and fewer passengers who had multiple family members.  Impossibly, 7 passengers  have ten family members aboard.
+    	</p>
+    </div>
+  </div>
 
 </body>
 </html>
