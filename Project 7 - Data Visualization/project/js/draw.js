@@ -137,7 +137,7 @@ function draw(data) {
 
     };
 
-    function add_category_nav_buttons(categoryToGroup="Sex", categoryToColor = "") {
+    function add_base_buttons(categoryToGroup="Sex", categoryToColor = "") {
     	// Add Category buttons
 	        var category_buttons = d3.select('div #chartContainer')
 	                          .append('div')
@@ -197,6 +197,8 @@ function draw(data) {
 
 	        navigation_buttons.on("click", function(d, clickCount) {
 
+	        	debugger;
+
 	           	if (d === "Next") {
 			        //Clear the chart container div
 			        d3.select('div #chartContainer')
@@ -208,7 +210,8 @@ function draw(data) {
 			        
 			        if(clickCount === 0) { 
 			        	draw_bar_chart("Sex", "Survival");
-			        	animate_chart("Sex", "Survival");
+			        	//animate_chart("Sex", "Survival");
+    					add_base_buttons("Sex", "Survival");
 			    	}
 			    	else {
 			    		// TODO:: Make the final chart
@@ -224,7 +227,8 @@ function draw(data) {
 			        d3.select("svg").remove();
 
 			        draw_bar_chart();
-			        animate_chart();
+			        //animate_chart();
+			        add_base_buttons("Sex", "");
 		        }
 
 	        }); 
@@ -243,7 +247,11 @@ function draw(data) {
 
     };
 
-    animate_chart();
+    //animate_chart();
+
+    update_chart("Sex", "");
+    add_base_buttons("Sex", "");
+
 
     function animate_chart(categoryToGroup="Sex", categoryToColor = "") {
     	var categoryIndex = 0;
@@ -253,7 +261,7 @@ function draw(data) {
 			categoryIndex++;
 			if (categoryIndex > categories.length) {
 				clearInterval(categoryInterval);
-				add_category_nav_buttons(categoryToGroup, categoryToColor);
+				add_base_buttons(categoryToGroup, categoryToColor);
 	    	}
     	}, 1000);
 
@@ -308,6 +316,45 @@ function draw(data) {
 		});
 
 		draw_multi_category_chart();
+
+		var navigation_buttons = d3.select('div #chartContainer')
+							  .select(".custom-label")
+	                          .append('div')
+	                          .attr('id', 'navButtonSet')
+	                          .attr('class', 'nav-btn-group')
+	                          .selectAll('button')
+	                          .data(["Previous"])
+	                          .enter()
+	                          .append('button')
+	                          .attr("value", function(d) { return d; })
+	                          .text(function(d) { return d; })
+	                          .style("float", "right");
+
+
+	    navigation_buttons.on("click", function() {
+
+			//Clear the chart container div
+			d3.select('div #chartContainer')
+			   .selectAll('div')
+			   .remove();
+
+			// Remove the svg
+			d3.select("svg").remove();
+			        
+			draw_bar_chart("Sex", "Survival");
+    		add_base_buttons("Sex", "Survival");
+
+	    }); 
+
+	    // Mark Sex Button as Enabled
+	    d3.select(".btn-group")
+	        .select("button")
+	        .transition()
+	        .duration(500)
+	        .style("background", "#85CFE7")
+	        .style("color", "black")
+	        .style("font-weight", "bold")
+	        .style("font-size", "9");      
 	}
 
     function draw_multi_category_chart(cat_x="Sex", cat_y="Sex") {

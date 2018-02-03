@@ -73,18 +73,21 @@
 
 
 .nav-btn-group button {
-  background: #85CFE7;
-  border-radius: 60px;
-  padding: 10px 30px;
-  color: #fff;
-  text-decoration: none;
-  font-size: 1em;
-  margin: 0 15px;
+    font-family: "Helvetica Neue", Helvetica;
+    font-size: 14px;
+    padding-right: 100px;
+    background-color: #EA7944; 
+    border: 2px none; /* No border */
+    color: black; /* White text */
+    padding: 10px 20px; /* Some padding */
+    cursor: pointer; /* Pointer/hand icon */
+    float: right; /* Float the buttons side by side */
 }
 
 .nav-btn-group button:hover { 
-  -webkit-animation: hover 1200ms linear 2 alternate;
-  animation: hover 1200ms linear 2 alternate;
+  background-color: #E7AC90;
+  -webkit-animation: hover 1000ms linear 1 alternate;
+  animation: hover 1000ms linear 1 alternate;
 }
 
 /* End Button Group Styling */
