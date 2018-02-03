@@ -53,22 +53,20 @@ function draw(data) {
 			var cleanData = data;
 		}
 
-		var svgSingleVarCategory = dimple.newSvg("#chartContainer", lWidth + margin, lHeight + margin);
-	    var singleVarGroupByChart = new dimple.chart(svgSingleVarCategory, cleanData);
+		var svg = dimple.newSvg("#chartContainer", lWidth + margin, lHeight + margin);
+	    var chart = new dimple.chart(svg, cleanData);
 
 		if(categoryToColor === "") {
-			var x = singleVarGroupByChart.addCategoryAxis("x", [categoryToGroup]);
+			var x = chart.addCategoryAxis("x", [categoryToGroup]);
 	    } else {
-	    	var x = singleVarGroupByChart.addCategoryAxis("x", [categoryToGroup, categoryToColor]);
+	    	var x = chart.addCategoryAxis("x", [categoryToGroup, categoryToColor]);
 	    }
 
-	    var y = singleVarGroupByChart.addMeasureAxis("y","PassengerID");
+	    var y = chart.addMeasureAxis("y","PassengerID");
 
-	    singleVarGroupByChart.setBounds(margin*1.5, margin*1.2, lWidth - margin*2, lHeight - margin*1.2);
+	    chart.setBounds(margin*1.5, margin*1.2, lWidth - margin*2, lHeight - margin*1.5);
 
 	    /* Axis titles */
-	    //debugger;
-	    x.title = categoryToGroup;
 	    var seriesOrderRule = getSeriesOrderRule(categoryToGroup);
 	    x.addOrderRule(seriesOrderRule);
 	    x.ticks = seriesOrderRule.length-1;
@@ -77,32 +75,31 @@ function draw(data) {
 	    y.ticks = 6;
 
 	    if(categoryToColor === "") {
-			var chartSeries = singleVarGroupByChart.addSeries(null, dimple.plot.bar);
+			var chartSeries = chart.addSeries(null, dimple.plot.bar);
 	    } else {
-	    	var chartSeries = singleVarGroupByChart.addSeries(categoryToColor, dimple.plot.bar);
-	    	singleVarGroupByChart.addLegend(margin*2, margin, lWidth - margin*2 + 15, 40, "right");
+	    	var chartSeries = chart.addSeries(categoryToColor, dimple.plot.bar);
+	    	chart.addLegend(margin*2, margin, lWidth - margin*2 + 15, 40, "right");
 	    }
 
 	    chartSeries.aggregate = dimple.aggregateMethod.count;    
-	    chartSeries.barGap = 0.2;
+	    chartSeries.barGap = 0.4;
 
-	    svgSingleVarCategory.append("text")
-				    		.attr("x", singleVarGroupByChart._xPixels() + singleVarGroupByChart._widthPixels() / 2)
-				    		.attr("y", singleVarGroupByChart._yPixels() - 20)
-				    		.style("text-anchor", "middle")
-				    		.style("font-family", "sans-serif")
-				    		.style("font-weight", "bold")
-				    		.text("Passenger counts by " + categoryToGroup);
-
+	    svg.append("text")
+			.attr("x", chart._xPixels() + chart._widthPixels() / 2)
+			.attr("y", chart._yPixels() - 20)
+			.style("text-anchor", "middle")
+			.style("font-family", "sans-serif")
+			.style("font-weight", "bold")
+			.text("Passenger counts by " + categoryToGroup);
 
 	    // Removing X axis tick lines
-	    svgSingleVarCategory.selectAll('.dimple-gridline')
-	    		  			.style("visibility", "hidden");
+	    svg.selectAll('.dimple-gridline')
+	    	.style("visibility", "hidden");
 
 	    if (categoryToColor === "Survival") {
-		    singleVarGroupByChart.defaultColors = [
-		    	{fill: "#FB8072", stroke: "rgb(210, 107, 95)", opacity: 0.8},
-		    	{fill: "#80B1D3", stroke: "rgb(107, 148, 177)", opacity: 0.8}
+		    chart.defaultColors = [
+		    	{fill: "#E93215", stroke: "#CD2207", opacity: 0.6},
+		    	{fill: "#5BC684", stroke: "#2AB05D", opacity: 0.6}
 		    ];
 		}
 	    // Customize ToolTip
@@ -126,11 +123,11 @@ function draw(data) {
 		    return toolTipText;
 		};
 
-	    singleVarGroupByChart.draw();
+	    chart.draw(1000);
 	};
     
-    /* Function to Update the Bar chart according to Category */
-    function update(categoryToGroup, categoryToColor = "") {
+    /* Function to update_chart the Bar chart according to Category */
+    function update_chart(categoryToGroup, categoryToColor = "") {
     	// Remove the previous SVG
     	d3.select("svg").remove();
     	//d3.select("#navButtonSet").remove();
@@ -194,8 +191,8 @@ function draw(data) {
 		              .style("font-weight", "bold")
 		              .style("font-size", "9");
 
-		        // Update the SVG Bar Chart
-		        update(d, categoryToColor);
+		        // update_chart the SVG Bar Chart
+		        update_chart(d, categoryToColor);
 	       	}); 
 
 	        navigation_buttons.on("click", function(d, clickCount) {
@@ -211,7 +208,7 @@ function draw(data) {
 			        
 			        if(clickCount === 0) { 
 			        	draw_bar_chart("Sex", "Survival");
-			        	animate_svg("Sex", "Survival");
+			        	animate_chart("Sex", "Survival");
 			    	}
 			    	else {
 			    		// TODO:: Make the final chart
@@ -227,13 +224,13 @@ function draw(data) {
 			        d3.select("svg").remove();
 
 			        draw_bar_chart();
-			        animate_svg();
+			        animate_chart();
 		        }
 
 	        }); 
 
 	        // Mark Sex Button as Enabled
-	        update("Sex", categoryToColor);
+	        update_chart("Sex", categoryToColor);
 	            
 	        d3.select(".btn-group")
 	                  .select("button")
@@ -246,13 +243,13 @@ function draw(data) {
 
     };
 
-    animate_svg();
+    animate_chart();
 
-    function animate_svg(categoryToGroup="Sex", categoryToColor = "") {
+    function animate_chart(categoryToGroup="Sex", categoryToColor = "") {
     	var categoryIndex = 0;
     	var categoryInterval = setInterval(function() { 
  
-	    	update(categories[categoryIndex], categoryToColor);
+	    	update_chart(categories[categoryIndex], categoryToColor);
 			categoryIndex++;
 			if (categoryIndex > categories.length) {
 				clearInterval(categoryInterval);
@@ -361,9 +358,9 @@ function draw(data) {
 	    rings.aggregate = dimple.aggregateMethod.count;  
 
 	    chart.defaultColors = [
-		   	{fill: "#FB8072", stroke: "rgb(210, 107, 95)", opacity: 0.8},
-		    {fill: "#80B1D3", stroke: "rgb(107, 148, 177)", opacity: 0.8}
-		];  
+		    {fill: "#E93215", stroke: "#CD2207", opacity: 0.6},
+		    {fill: "#5BC684", stroke: "#2AB05D", opacity: 0.6}
+		]; 
 
 		// Customize ToolTip
 		rings.getTooltipText = function (e) {
@@ -406,7 +403,7 @@ function draw(data) {
 				.text("Passenger Survivals by " + cat_x + "-" + cat_y);
 		}
 
-	    chart.draw();
+	    chart.draw(1000);
 
     }
 
