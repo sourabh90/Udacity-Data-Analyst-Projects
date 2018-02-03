@@ -82,15 +82,20 @@ function draw(data) {
 	    }
 
 	    chartSeries.aggregate = dimple.aggregateMethod.count;    
-	    chartSeries.barGap = 0.4;
+	    chartSeries.barGap = 0.3;
 
-	    svg.append("text")
+	    var text = svg.append("text")
 			.attr("x", chart._xPixels() + chart._widthPixels() / 2)
 			.attr("y", chart._yPixels() - 20)
 			.style("text-anchor", "middle")
 			.style("font-family", "sans-serif")
-			.style("font-weight", "bold")
-			.text("Passenger counts by " + categoryToGroup);
+			.style("font-weight", "bold");
+
+		if (categoryToColor === "") {
+			text.text("Passenger counts by " + categoryToGroup);
+		} else {
+			text.text( categoryToColor + "s by " + categoryToGroup);
+		}
 
 	    // Removing X axis tick lines
 	    svg.selectAll('.dimple-gridline')
@@ -154,7 +159,7 @@ function draw(data) {
 	        if(categoryToColor === "") {
 	            var navButtonSetValues = ["Next"];
 	        } else {
-	            var navButtonSetValues = ["Previous", "Next"];
+	            var navButtonSetValues = ["Next >>", "<< Previous"];
 	        }
             
 	        var navigation_buttons = d3.select('div #chartContainer')
@@ -195,11 +200,9 @@ function draw(data) {
 		        update_chart(d, categoryToColor);
 	       	}); 
 
-	        navigation_buttons.on("click", function(d, clickCount) {
+	        navigation_buttons.on("click", function(d, clickIndex) {
 
-	        	debugger;
-
-	           	if (d === "Next") {
+	           	if (d.substr(0, 4) === "Next") {
 			        //Clear the chart container div
 			        d3.select('div #chartContainer')
 			          .selectAll('div')
@@ -208,14 +211,63 @@ function draw(data) {
 			        // Remove the svg
 			        d3.select("svg").remove();
 			        
-			        if(clickCount === 0) { 
+			        if(clickIndex === 0 && d === "Next") { 
 			        	draw_bar_chart("Sex", "Survival");
 			        	//animate_chart("Sex", "Survival");
     					add_base_buttons("Sex", "Survival");
+
+    					// Add Analysis
+					    d3.select("#footer")
+					    	.select("h4")
+					    	.text("Analysis on Survival"); 
+
+					    d3.select("#footer")
+					    	.selectAll("li")
+					    	.remove();
+
+
+					    d3.select("#footer").select("ul")
+					    	.selectAll("li")
+					    	.data([
+					    			"Huge number of deaths for male passengers. Alomost 52% of entire deaths were of males. Whereas only 9% of entire deaths was for females.",
+					    			"Huge number of deaths for third class passengers, almost 41% of entire deaths. Comparatively much lower deaths for first and second classes.",
+					    			"The embarkment points does not really help us understanding the survivals.",
+					    			"Survivals and deaths are pretty equally distributed across different Age groups."
+					    		])
+					    	.enter()
+					    	.append("li")
+					    	.text(function(d) { return d; });
 			    	}
 			    	else {
-			    		// TODO:: Make the final chart
 			    		draw_final_chart();
+						// Add Analysis
+					    d3.select("#footer")
+					    	.select("h4")
+					    	.text("Conclusion"); 
+
+					    d3.select("#footer")
+					    	.selectAll("li")
+					    	.remove();
+
+
+					    d3.select("#footer").select("ul")
+					    	.selectAll("li")
+					    	.data([
+					    			"Females were survived most. Very less females died from first and second classes. Few females died from third class.",
+					    			"Males were died mostly from third and second class, but in first class some of males were survived.",
+					    			"All children from second class were saved. First class children, youths, and adults got much better survival rates. But all other age groups were died irrespective of class",
+					    			"Almost 60% of children were saved. Other age groups have much higher deaths."
+					    		])
+					    	.enter()
+					    	.append("li")
+					    	.text(function(d) { return d; });
+
+					    d3.select("#footer")
+					    	.append("p")
+					    	.attr("class", "text")
+					    	.text("We can conclude that children and females were tried to be saved during the disaster. First class passengers were also saved. Most of the male passengers died from second and third class across all age groups.")
+					    	.style("font-weight", "bold")
+					    	.style("font-size", "14px");
 			    	}
 		        } else {
 		        	//Clear the chart container div
@@ -229,6 +281,29 @@ function draw(data) {
 			        draw_bar_chart();
 			        //animate_chart();
 			        add_base_buttons("Sex", "");
+
+
+			        // Add Analysis
+					d3.select("#footer")
+					    .select("h4")
+					    .text("Summary of Passengers"); 
+
+					d3.select("#footer")
+					    .selectAll("li")
+					    .remove();
+
+
+					d3.select("#footer").select("ul")
+					    .selectAll("li")
+					    .data([
+					    		"It can be clearly seen that around 65% Male passengers were onboarded in Titanic.",
+					    		"More than 50% passengers belonged to third class.",
+					    		"Around 75% passengers were boarded from Southampton.",
+					    		"Age distribution was pretty much normal."
+					    	])
+					    .enter()
+					    .append("li")
+					    .text(function(d) { return d; });
 		        }
 
 	        }); 
@@ -274,8 +349,7 @@ function draw(data) {
 							.append('div');
 
 		dropDownDiv.append('h4')
-			.text('Select any 2 categories to display the survivals')
-			.append('br');
+			.text('Select 2 categories to display the survivals');
 
 	    dropDownDiv.selectAll('label')
 	    	.data(['Horizontal Category', 'Vertical Category'])
@@ -284,7 +358,7 @@ function draw(data) {
 			.attr('class', 'custom-label')
 			.text(function(d) { return d; })
 			.append('select')
-			.attr('id', function(d) { return 'dropDownSet' + (d === 'Horizontal Category' ? 0 : 1); } )
+			.attr('id', function(d) { return 'dropDownSet' + (d[0] === 'H' ? 0 : 1); } )
 			.attr('class', 'custom-dropdown');
 
 		var cat1 = d3.select('div #dropDownSet0');
@@ -344,6 +418,28 @@ function draw(data) {
 			draw_bar_chart("Sex", "Survival");
     		add_base_buttons("Sex", "Survival");
 
+			// Add Analysis
+			d3.select("#footer")
+				.select("h4")
+				.text("Analysis on Survival"); 
+
+			d3.select("#footer")
+				.selectAll("li")
+				.remove();
+
+
+			d3.select("#footer").select("ul")
+				.selectAll("li")
+				.data([
+					"Huge number of deaths for male passengers. Alomost 52% of entire deaths were of males. Whereas only 9% of entire deaths was for females.",
+					"Huge number of deaths for third class passengers, almost 41% of entire deaths. Comparatively much lower deaths for first and second classes.",
+					"The embarkment points does not really help us understanding the survivals.",
+					"Survivals and deaths are pretty equally distributed across different Age groups."
+				])
+				.enter()
+				.append("li")
+				.text(function(d) { return d; });
+
 	    }); 
 
 	    // Mark Sex Button as Enabled
@@ -354,10 +450,15 @@ function draw(data) {
 	        .style("background", "#85CFE7")
 	        .style("color", "black")
 	        .style("font-weight", "bold")
-	        .style("font-size", "9");      
+	        .style("font-size", "9");   
+
 	}
 
     function draw_multi_category_chart(cat_x="Sex", cat_y="Sex") {
+    	scaler = 0.5;
+		lWidth = width * scaler;
+		lHeight = height * scaler;
+
     	data = nullFreeData(data, cat_x);
     	data = nullFreeData(data, cat_y);
 
@@ -376,14 +477,14 @@ function draw(data) {
 	    var rings = chart.addSeries("Survival", dimple.plot.pie);
 
 	    if (cat_y === "Age_Group" && cat_x != "Age_Group") {
+	    	rings.innerRadius = 10;
+	    	rings.outerRadius = 25;
+		} else if (cat_y === "Age_Group" && cat_x === "Age_Group") {
 	    	rings.innerRadius = 15;
 	    	rings.outerRadius = 30;
-		} else if (cat_y === "Age_Group" && cat_x === "Age_Group") {
-	    	rings.innerRadius = 20;
-	    	rings.outerRadius = 35;
 		} else {
-			rings.innerRadius = 40;
-			rings.outerRadius = 60;
+			rings.innerRadius = 30;
+			rings.outerRadius = 50;
 		}
 
 		if (cat_x === "Age_Group") {
@@ -403,6 +504,9 @@ function draw(data) {
 
 	    // Sum of Passengers
 	    rings.aggregate = dimple.aggregateMethod.count;  
+
+	    svg.selectAll('.dimple-gridline')
+	    	.style("visibility", "true");
 
 	    chart.defaultColors = [
 		    {fill: "#E93215", stroke: "#CD2207", opacity: 0.6},
