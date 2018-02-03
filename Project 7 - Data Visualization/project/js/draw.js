@@ -177,7 +177,7 @@ function draw(data) {
 			            .selectAll("button")
 			            .transition()
 			            .duration(500)
-			            .style("background", "#4CAF50")
+			            .style("background", "#079DCD")
 			            .style("color", "white")
 			            .style("font-weight", "normal")
 			            .style("font-size", "10");
@@ -186,7 +186,7 @@ function draw(data) {
 		        d3.select(this)
 		              .transition()
 		              .duration(500)
-		              .style("background", "#3e8e41")
+		              .style("background", "#85CFE7")
 		              .style("color", "black")
 		              .style("font-weight", "bold")
 		              .style("font-size", "9");
@@ -236,7 +236,7 @@ function draw(data) {
 	                  .select("button")
 	                  .transition()
 	                  .duration(500)
-	                  .style("background", "#3e8e41")
+	                  .style("background", "#85CFE7")
 	                  .style("color", "black")
 	                  .style("font-weight", "bold")
 	                  .style("font-size", "9");
