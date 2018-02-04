@@ -1,13 +1,13 @@
-.banner {
+.top {
     text-align: center;
     font-family: "Helvetica Neue", Helvetica;
     font-size: 12px;
     padding: 0.1px;
     color: black;
-    background-color: #0abda0;/*#d02560;*/
+    background-color: #0abda0;
 }
 
-.banner:hover { color: white; text-decoration: blink; }
+.top:hover { color: white; text-decoration: blink; }
 
 h4 {
     font-family: "Helvetica Neue", Helvetica;
@@ -50,15 +50,15 @@ h4 {
     font-family: "Helvetica Neue", Helvetica;
     font-size: 10px;
     padding-left: 80px;
-    background-color: #079DCD; /* Green background */
-    border: 2px none; /* No border */
-    color: white; /* White text */
+    background-color: #079DCD; 
+    border: 2px none; 
+    color: white; 
     padding: 8px 24px; /* Some padding */
     cursor: pointer; /* Pointer/hand icon */
-    float: left; /* Float the buttons side by side */
+    float: left; 
 }
 
-/* Clear floats (clearfix hack) */
+/* Clear floats */
 .btn-group:after {
     content: "";
     clear: both;
@@ -87,12 +87,11 @@ h4 {
     font-size: 14px;
     padding-right: 100px;
     background-color: #EA7944; 
-    /*border: 2px solid #EE4924; /* No border */
     border-radius: 8px;
-    color: white; /* White text */
+    color: white; 
     padding: 8px 16px; /* Some padding */
     cursor: pointer; /* Pointer/hand icon */
-    float: none; /* Float the buttons side by side */
+    float: none; 
 }
 
 .nav-btn-group button:hover { 
