@@ -54,7 +54,11 @@ Action: Changed the chart as suggested, and modified the gridlines.
 RESOURCES
 ======================
 https://www.kaggle.com/c/titanic
+
 http://dimplejs.org/examples_viewer.html?id=bars_vertical_grouped
+
 http://dimplejs.org/examples_viewer.html?id=ring_matrix
+
 https://github.com/PMSI-AlignAlytics/dimple/wiki
+
 https://github.com/d3/d3/wiki/Tutorials
