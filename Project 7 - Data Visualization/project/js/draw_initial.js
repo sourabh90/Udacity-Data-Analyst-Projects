@@ -76,7 +76,6 @@ function draw(data) {
 
 	    y.title = "Number of Passengers";
 	    y.ticks = 6;
-	    y.showGridlines = false;
 
 	    if(categoryToColor === "") {
 			var chartSeries = chart.addSeries(null, dimple.plot.bar);
@@ -374,16 +373,6 @@ function draw(data) {
 			.attr("value", function(d) { return d; })
 			.text(function(d) { return d; });
 
-		cat1.on("change", function(d) {
-			var cat1_value = cat1.property('value');
-			var cat2_value = cat2.property('value');
-
-			// Remove the SVG
-			d3.select("svg").remove();
-
-			draw_multi_category_chart(cat1_value, cat2_value);
-		});
-
 		var cat2 = d3.select('div #dropDownSet1');
 
 		cat2.selectAll('option')
@@ -494,7 +483,7 @@ function draw(data) {
 	    var rings = chart.addSeries("Survival", dimple.plot.pie);
 
 	    if (cat_y === "Age_Group" && cat_x != "Age_Group") {
-	    	rings.innerRadius = 15;
+	    	rings.innerRadius = 10;
 	    	rings.outerRadius = 25;
 		} else if (cat_y === "Age_Group" && cat_x === "Age_Group") {
 	    	rings.innerRadius = 15;
@@ -514,12 +503,10 @@ function draw(data) {
 	    var seriesOrderRule_x = getSeriesOrderRule(cat_x);
 	    x.addOrderRule(seriesOrderRule_x);
 	    x.ticks = seriesOrderRule_x.length-1;
-	    x.showGridlines = true;
 
 	    var seriesOrderRule_y = getSeriesOrderRule(cat_y);
 	    y.addOrderRule(seriesOrderRule_y);
 	    y.ticks = seriesOrderRule_y.length-1;
-	    y.showGridlines = true;
 
 	    // Sum of Passengers
 	    rings.aggregate = dimple.aggregateMethod.count;  
