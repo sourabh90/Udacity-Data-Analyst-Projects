@@ -62,3 +62,5 @@ http://dimplejs.org/examples_viewer.html?id=ring_matrix
 https://github.com/PMSI-AlignAlytics/dimple/wiki
 
 https://github.com/d3/d3/wiki/Tutorials
+
+https://www.w3schools.com
